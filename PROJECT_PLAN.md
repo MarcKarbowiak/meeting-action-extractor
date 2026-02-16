@@ -99,27 +99,28 @@ Azure infrastructure is documented but not required to run locally.
 - [x] Audit events for job lifecycle
 
 ### Phase 5 — Web
-- [ ] Tenant selector
-- [ ] Submit notes screen
-- [ ] Task review screen
-- [ ] Approve/reject/edit tasks
-- [ ] CSV export trigger
+- [x] Tenant selector
+- [x] Submit notes screen
+- [x] Task review screen
+- [x] Approve/reject/edit tasks
+- [x] CSV export trigger
 
 ### Phase 6 — Tests + CI
-- [ ] Unit tests (extractor, RBAC, tenant enforcement)
-- [ ] Integration tests (API + worker end-to-end)
-- [ ] GitHub Actions workflow
+- [x] Unit tests (extractor, RBAC, tenant enforcement)
+- [x] Integration tests (API + worker end-to-end)
+- [x] GitHub Actions workflow
 
-### Phase 7 — Documentation
+### Phase 7 — Azure Reference Docs + IaC Skeleton Polish
 - [ ] docs/architecture/local-vs-azure.md
-- [ ] Security / no-secrets policy
-- [ ] Demo walkthrough in README
+- [ ] infra/azure IaC skeleton refinement
+- [ ] Security / no-secrets policy verification
+- [ ] Final Azure reference runbook
 
 ---
 
 ## Current Status
 
-- Repo initialized: Yes (Phase 1, Phase 2, Phase 3, and Phase 4 complete)
+- Repo initialized: Yes (Phase 1 through Phase 6 complete)
 - Last green commit: Local workspace checks passed (lint + typecheck + test)
 - Known issues: None
 
@@ -127,10 +128,5 @@ Azure infrastructure is documented but not required to run locally.
 
 ## Next Up
 
-Begin Phase 5 — Web.
-
-After Phase 5 completion:
-- Update this file
-- Mark Phase 5 complete
-- Move Phase 6 to active
+Begin Phase 7 — Azure reference docs + IaC skeleton polish.
 

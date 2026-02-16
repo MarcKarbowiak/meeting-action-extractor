@@ -9,9 +9,11 @@
     "dev:web": "pnpm --filter @meeting-action-extractor/web dev",
     "store:seed": "pnpm --filter @meeting-action-extractor/db seed",
     "worker:once": "pnpm --filter @meeting-action-extractor/worker once",
-    "test": "pnpm -r --if-present test",
+    "test:clean": "node ./scripts/clean-test-data.mjs",
+    "test": "pnpm test:clean && pnpm -r --if-present test",
     "lint": "pnpm -r --if-present lint",
     "typecheck": "pnpm -r --if-present typecheck",
+    "ci": "pnpm lint && pnpm typecheck && pnpm test",
     "format": "prettier --write ."
   },
   "devDependencies": {

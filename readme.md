@@ -2,6 +2,75 @@
 
 Demo-ready, consulting-grade, multi-tenant app scaffold for extracting structured action items from meeting notes.
 
+## Quick Demo (< 10 minutes)
+
+From repo root:
+
+```bash
+pnpm install
+pnpm store:seed
+```
+
+Run in separate terminals:
+
+```bash
+# Terminal 1
+cd apps/api
+pnpm dev
+```
+
+```bash
+# Terminal 2
+cd apps/worker
+pnpm dev
+```
+
+```bash
+# Terminal 3
+cd apps/web
+pnpm dev
+```
+
+Minimal path (without long-running worker):
+
+```bash
+# Terminal 1
+cd apps/api
+pnpm dev
+```
+
+```bash
+# Terminal 2 (run once after submitting a note)
+pnpm worker:once
+```
+
+```bash
+# Terminal 3
+cd apps/web
+pnpm dev
+```
+
+Dev Context values in web UI:
+
+- Tenant ID: `tenant-demo-001`
+- User ID: `user-demo-admin`
+- Email: `admin@demo.local`
+- Roles: `admin,member`
+
+Sample note:
+
+```
+Meeting: Weekly Team Sync - Feb 16, 2026
+
+Action Items:
+ACTION: Hank to provide development plan by Friday
+TODO: Ira to complete Q1 metrics report due 2026-02-20
+NEXT: Schedule follow-up meeting @Sarah
+FOLLOW UP: Review performance improvement plan with HR
+- Set up mentorship sessions for Ira
+- Document quarterly objectives
+```
+
 ## Quick Start
 
 ### 1. Install Dependencies
