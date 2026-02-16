@@ -1,6 +1,74 @@
 # meeting-action-extractor
 
-Demo-ready, consulting-grade, multi-tenant app scaffold for extracting structured action items from meeting notes.
+Local-first, multi-tenant reference implementation for extracting structured action items from meeting notes.
+
+This repository demonstrates:
+
+- Strict tenant isolation (partition key = tenantId)
+- Document-oriented schema aligned with Cosmos DB
+- Async processing pipeline (API → Job → Worker → Extraction → Tasks)
+- Deterministic extraction provider (rules-based, testable)
+- Zero-infrastructure Local Mode
+- Azure reference architecture (Managed Identity + Key Vault)
+- Architecture Decision Records (ADRs)
+- CI-enforced quality gates
+
+Local Mode runs fully offline with no cloud dependencies.
+
+## Architecture Overview
+
+```mermaid
+flowchart TD
+
+%% =========================
+%% Local Mode (Default)
+%% =========================
+
+subgraph Local_Mode["Local Mode (Zero Infrastructure)"]
+
+    Web["Web UI<br/>(React + MUI)"]
+    API["API<br/>(Fastify)"]
+    Store["Store Interface<br/>(Document-Oriented)"]
+    LocalJSON["Local JSON Store<br/>(.local-data/)"]
+    Worker["Worker<br/>(Async Job Processor)"]
+    Extractor["Rules Extraction Provider"]
+    Tasks["Tasks<br/>(Suggested → Approved)"]
+
+    Web --> API
+    API --> Store
+    Store --> LocalJSON
+
+    API -->|enqueue job| Worker
+    Worker --> Extractor
+    Extractor -->|generate tasks| Store
+    Store --> Tasks
+end
+
+%% =========================
+%% Azure Mode (Reference)
+%% =========================
+
+subgraph Azure_Mode["Azure Mode (Reference Architecture)"]
+
+    AppService["App Service<br/>(API)"]
+    FunctionApp["Function App<br/>(Worker)"]
+    Cosmos["Cosmos DB<br/>(Partition Key: tenantId)"]
+    KeyVault["Key Vault<br/>(Managed Identity)"]
+    AppInsights["Application Insights"]
+
+    AppService --> Cosmos
+    FunctionApp --> Cosmos
+    AppService --> KeyVault
+    FunctionApp --> KeyVault
+    AppService --> AppInsights
+    FunctionApp --> AppInsights
+end
+
+%% Alignment Arrows
+API -.aligned with.-> AppService
+Worker -.aligned with.-> FunctionApp
+LocalJSON -.interface compatible.-> Cosmos
+```
 
 ## Quick Demo (< 10 minutes)
 
@@ -52,8 +120,8 @@ pnpm dev
 
 Dev Context values in web UI:
 
-- Tenant ID: `tenant-demo-001`
-- User ID: `user-demo-admin`
+- Tenant ID: `tenant-demo`
+- User ID: `user-admin-demo`
 - Email: `admin@demo.local`
 - Roles: `admin,member`
 
@@ -64,7 +132,7 @@ Meeting: Weekly Team Sync - Feb 16, 2026
 
 Action Items:
 ACTION: Hank to provide development plan by Friday
-TODO: Ira to complete Q1 metrics report due 2026-02-20
+ACTION: Ira to complete Q1 metrics report due 2026-02-20
 NEXT: Schedule follow-up meeting @Sarah
 FOLLOW UP: Review performance improvement plan with HR
 - Set up mentorship sessions for Ira
@@ -77,6 +145,7 @@ Azure Mode is documentation + IaC skeleton only. It is designed for architecture
 
 - Architecture mapping: [docs/architecture/local-vs-azure.md](docs/architecture/local-vs-azure.md)
 - Azure reference topology: [docs/architecture/azure-reference-architecture.md](docs/architecture/azure-reference-architecture.md)
+- ADR index: [docs/architecture/adr_readme.md](docs/architecture/adr_readme.md)
 - IaC skeleton: [infra/azure](infra/azure)
 - Azure deployment notes: [infra/azure/README.md](infra/azure/README.md)
 
@@ -128,8 +197,8 @@ Web UI runs at `http://localhost:5173`
 1. Navigate to `http://localhost:5173`
 2. Expand the **Dev Auth Context** panel at the top
 3. Enter demo credentials:
-   - **Tenant ID:** `tenant-demo-001`
-   - **User ID:** `user-demo-admin`
+     - **Tenant ID:** `tenant-demo`
+     - **User ID:** `user-admin-demo`
    - **Email:** `admin@demo.local`
    - **Roles:** `admin,member`
 
@@ -148,7 +217,7 @@ Discussion Points:
 
 Action Items:
 ACTION: Hank to provide development plan by Friday
-TODO: Ira to complete Q1 metrics report due 2026-02-20
+ACTION: Ira to complete Q1 metrics report due 2026-02-20
 NEXT: Schedule follow-up meeting @Sarah
 FOLLOW UP: Review performance improvement plan with HR
 
@@ -174,7 +243,7 @@ The worker will automatically extract **6 tasks** from this note within a few se
 - `packages/extractor` — Rules-based task extraction engine
 - `packages/shared` — Shared types/utilities
 - `infra/local` — Local infrastructure placeholders
-- `infra/azure` — Azure reference placeholders
+- `infra/azure` — Azure reference IaC skeleton
 
 ## How Task Extraction Works
 
@@ -182,9 +251,9 @@ The rules-based extractor looks for:
 
 **Keywords:**
 - `ACTION:`
-- `TODO:`
 - `NEXT:`
 - `FOLLOW UP:`
+- Additional explicit task prefixes supported by the extractor
 
 **Heuristics:**
 - Bullet points starting with action verbs (e.g., "Schedule", "Review", "Complete")
@@ -216,8 +285,8 @@ From project root:
 ```bash
 pnpm store:seed      # Seed local data
 pnpm dev             # Start API only
-pnpm dev:worker      # Start worker only
-pnpm dev:web         # Start web UI only
+pnpm dev:worker      # Start worker only (from repo root)
+pnpm dev:web         # Start web UI only (from repo root)
 pnpm worker:once     # Run worker once (manual)
 pnpm test            # Run all tests
 pnpm lint            # Lint all packages
@@ -235,6 +304,8 @@ Request headers for auth context:
 - `x-user-email` — User email
 - `x-user-roles` — Comma-separated roles: `admin`, `member`, `reader`
 
+These headers are **development-mode only** and used for local demo auth context.
+
 **Development mode:** Falls back to demo context if headers missing  
 **Production mode:** Returns `401` if headers missing
 
@@ -245,6 +316,7 @@ Request headers for auth context:
 - `GET /notes` — List notes
 - `POST /notes` — Create note (member+)
 - `GET /notes/:id` — Get note details
+- `DELETE /notes/:id` — Delete note and related tasks/jobs (member+)
 - `GET /notes/:id/tasks` — Get tasks for note
 - `PATCH /tasks/:id` — Update task (member+)
 - `GET /tasks/export.csv?status=approved` — Export CSV
@@ -253,8 +325,8 @@ Request headers for auth context:
 
 **Health check:**
 ```bash
-curl -H "x-tenant-id: tenant-demo-001" \
-     -H "x-user-id: user-demo-admin" \
+curl -H "x-tenant-id: tenant-demo" \
+     -H "x-user-id: user-admin-demo" \
      -H "x-user-email: admin@demo.local" \
      -H "x-user-roles: admin" \
      http://localhost:3000/health
@@ -264,17 +336,17 @@ curl -H "x-tenant-id: tenant-demo-001" \
 ```bash
 curl -X POST http://localhost:3000/notes \
      -H "content-type: application/json" \
-     -H "x-tenant-id: tenant-demo-001" \
-     -H "x-user-id: user-demo-member" \
+     -H "x-tenant-id: tenant-demo" \
+     -H "x-user-id: user-member-demo" \
      -H "x-user-email: member@demo.local" \
      -H "x-user-roles: member" \
-     -d '{"title":"Weekly Sync","rawText":"ACTION: Review budget\nTODO: Submit report"}'
+     -d '{"title":"Weekly Sync","rawText":"ACTION: Review budget\nNEXT: Submit report"}'
 ```
 
 **Export tasks as CSV:**
 ```bash
-curl -H "x-tenant-id: tenant-demo-001" \
-     -H "x-user-id: user-demo-member" \
+curl -H "x-tenant-id: tenant-demo" \
+     -H "x-user-id: user-member-demo" \
      -H "x-user-email: member@demo.local" \
      -H "x-user-roles: member" \
      "http://localhost:3000/tasks/export.csv?status=approved"

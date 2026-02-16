@@ -1,1 +1,1 @@
-// Placeholder - see main.tsx for actual entry point
+// Intentionally minimal module; app entrypoint is src/main.tsx.

@@ -78,7 +78,7 @@ export const DevContextPanel = (): JSX.Element => {
               onChange={handleChange('tenantId')}
               fullWidth
               size="small"
-              placeholder="tenant-demo-001"
+              placeholder="tenant-demo"
             />
             <TextField
               label="User ID"
@@ -86,7 +86,7 @@ export const DevContextPanel = (): JSX.Element => {
               onChange={handleChange('userId')}
               fullWidth
               size="small"
-              placeholder="user-demo-admin"
+              placeholder="user-admin-demo"
             />
             <TextField
               label="Email"

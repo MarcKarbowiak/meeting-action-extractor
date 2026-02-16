@@ -1,3 +1,3 @@
-export type Placeholder = {
-  readonly scaffold: true;
+export type TenantScoped = {
+  tenantId: string;
 };

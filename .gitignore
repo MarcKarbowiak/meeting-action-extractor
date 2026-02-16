@@ -10,5 +10,3 @@ coverage/
 
 *.log
 *.tsbuildinfo
-
-pnpm-lock.yaml
