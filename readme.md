@@ -1,56 +1,49 @@
-# Meeting Action Extractor
+# meeting-action-extractor
 
-A multi-tenant AI SaaS template that transforms unstructured meeting notes into structured, reviewable action items.
+Demo-ready, consulting-grade, multi-tenant app scaffold for extracting structured action items from meeting notes.
 
-This repository is designed as a consulting-grade reference implementation demonstrating:
+## Modes
 
-- Multi-tenant SaaS architecture
-- Async processing with worker pattern
-- Tenant isolation and RBAC enforcement
-- AI-assisted structured extraction
-- Local-first developer experience
-- Azure-ready production architecture
-- No secrets in code (Key Vault + Managed Identity in Azure mode)
+### Local Mode
 
----
+Local development runs with Docker and does not require Azure.
 
-## Why This Repository Exists
+Current Phase 1 scaffold includes:
 
-This project serves as:
+- pnpm workspace monorepo
+- strict TypeScript baseline
+- lint/format tooling
+- PostgreSQL 15 via Docker Compose
 
-1. A runnable demonstration of pragmatic AI-enabled SaaS design  
-2. A reusable starting point for consulting engagements  
-3. A reference for secure cloud-native architecture patterns  
+### Azure Mode (Reference)
 
-It emphasizes disciplined system design, failure handling, and tenant safety over novelty.
+Azure mode is a reference architecture only in this phase (not implemented/runnable yet).
+Target design includes App Service + Functions + Key Vault + Managed Identity.
 
----
+## No Secrets Policy
 
-## Features (v1)
+- Never commit secrets, keys, tokens, or connection strings.
+- Use `.env.example` for placeholders only.
+- Azure mode must use Managed Identity + Key Vault.
 
-- Submit meeting notes for extraction
-- Async processing pipeline
-- Suggested action items with confidence scores
-- Approve / reject / edit tasks
-- Export approved tasks as CSV
-- Role-based access control (Admin, Member, Reader)
-- Audit logging of key actions
+## Quick Start
 
----
+1. Install dependencies:
+   - `pnpm install`
+2. Run checks:
+   - `pnpm typecheck`
+   - `pnpm lint`
+3. Start local database:
+   - `docker compose up`
 
-## Architecture Modes
+## Repository Layout
 
-### Local Mode (Easy Run)
-
-Runs entirely via Docker:
-
-- React frontend
-- Node.js API
-- Worker process
-- Postgres database
-- Deterministic rules-based extractor
-
-Start with:
-
-```bash
-docker compose up
+- `apps/api` — API service scaffold
+- `apps/worker` — background worker scaffold
+- `apps/web` — web app scaffold
+- `packages/shared` — shared types/util scaffold
+- `packages/db` — database package scaffold
+- `packages/extractor` — extraction package scaffold
+- `infra/local` — local infrastructure placeholders
+- `infra/azure` — Azure reference placeholders
+- `docs/architecture` — architecture docs placeholders
