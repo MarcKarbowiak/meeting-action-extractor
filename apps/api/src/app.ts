@@ -1,4 +1,5 @@
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
+import cors from '@fastify/cors';
 import type { LocalJsonStore, Role } from '@meeting-action-extractor/db';
 import { z, ZodError, type ZodType } from 'zod';
 
@@ -52,6 +53,12 @@ export const buildApiApp = (options: BuildApiAppOptions = {}): FastifyInstance =
     logger: {
       level: process.env.LOG_LEVEL ?? 'info',
     },
+  });
+
+  // Enable CORS for web app
+  app.register(cors, {
+    origin: ['http://localhost:5173'],
+    credentials: true,
   });
 
   app.addHook('onRequest', async (request, reply) => {
