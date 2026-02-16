@@ -79,9 +79,9 @@ Azure infrastructure is documented but not required to run locally.
 - [x] Docker Compose skeleton
 
 ### Phase 2 — Database
-- [ ] Migrations for all tables
-- [ ] Seed script (1 tenant, 1 admin, 1 member)
-- [ ] Repository abstraction layer
+- [x] Migrations for all tables
+- [x] Seed script (1 tenant, 1 admin, 1 member)
+- [x] Repository abstraction layer
 
 ### Phase 3 — API
 - [ ] Auth/tenant middleware
@@ -119,18 +119,18 @@ Azure infrastructure is documented but not required to run locally.
 
 ## Current Status
 
-- Repo initialized: Yes (Phase 1 scaffold complete)
-- Last green commit: Local workspace checks passed (lint + typecheck)
+- Repo initialized: Yes (Phase 1 and Phase 2 complete)
+- Last green commit: Local workspace checks passed (lint + typecheck + test)
 - Known issues: None
 
 ---
 
 ## Next Up
 
-Begin Phase 2 — Database.
+Begin Phase 3 — API.
 
-After Phase 2 completion:
+After Phase 3 completion:
 - Update this file
-- Mark Phase 2 complete
-- Move Phase 3 to active
+- Mark Phase 3 complete
+- Move Phase 4 to active
 
