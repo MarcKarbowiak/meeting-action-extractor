@@ -1,16 +1,19 @@
 import { rmSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { getDefaultDataDir, LocalFileStore } from '../src/store.js';
 
+const TEST_DATA_DIR = join(getDefaultDataDir(), 'db-test');
+
 describe('LocalFileStore', () => {
   beforeEach(() => {
-    rmSync(getDefaultDataDir(), { force: true, recursive: true });
+    rmSync(TEST_DATA_DIR, { force: true, recursive: true });
   });
 
   it('enforces tenant isolation for note reads', () => {
-    const store = new LocalFileStore();
+    const store = new LocalFileStore(TEST_DATA_DIR);
 
     store.upsertTenant({ id: 'tenant-a', name: 'Tenant A' });
     store.upsertTenant({ id: 'tenant-b', name: 'Tenant B' });
@@ -23,7 +26,7 @@ describe('LocalFileStore', () => {
   });
 
   it('prevents duplicate memberships for same tenant and user', () => {
-    const store = new LocalFileStore();
+    const store = new LocalFileStore(TEST_DATA_DIR);
 
     store.upsertTenant({ id: 'tenant-demo', name: 'Demo Tenant' });
     store.upsertUser({ id: 'user-1', email: 'member@demo.local' });
@@ -44,7 +47,7 @@ describe('LocalFileStore', () => {
   });
 
   it('locks a queued job only once', () => {
-    const store = new LocalFileStore();
+    const store = new LocalFileStore(TEST_DATA_DIR);
 
     store.upsertTenant({ id: 'tenant-demo', name: 'Demo Tenant' });
     const note = store.createNote('tenant-demo', 'Extract these tasks');

@@ -23,7 +23,7 @@ export type Membership = {
   createdAt: string;
 };
 
-export type NoteStatus = 'submitted';
+export type NoteStatus = 'submitted' | 'processing' | 'ready' | 'failed';
 
 export type Note = {
   id: string;
@@ -41,6 +41,7 @@ export type Task = {
   id: string;
   tenantId: string;
   noteId: string;
+  sourceJobId?: string;
   title: string;
   owner?: string;
   dueDate?: string;
@@ -57,8 +58,12 @@ export type Job = {
   tenantId: string;
   noteId: string;
   status: JobStatus;
+  attempts: number;
+  lastError?: string;
   createdAt: string;
   lockedAt?: string;
+  completedAt?: string;
+  updatedAt: string;
 };
 
 export type AuditEvent = {
@@ -429,9 +434,34 @@ export class LocalJsonStore {
     return data.notes.find((note) => note.id === noteId && note.tenantId === tenantId);
   }
 
+  public setNoteStatus(tenantId: string, noteId: string, status: NoteStatus): Note | undefined {
+    const data = this.read();
+    const index = data.notes.findIndex((note) => note.id === noteId && note.tenantId === tenantId);
+
+    if (index === -1) {
+      return undefined;
+    }
+
+    const existing = data.notes[index];
+    if (!existing) {
+      return undefined;
+    }
+
+    const updated: Note = {
+      ...existing,
+      status,
+    };
+
+    data.notes[index] = updated;
+    this.write(data);
+
+    return updated;
+  }
+
   public createTask(input: {
     tenantId: string;
     noteId: string;
+    sourceJobId?: string;
     title: string;
     owner?: string;
     dueDate?: string;
@@ -443,6 +473,7 @@ export class LocalJsonStore {
       id: createId(),
       tenantId: input.tenantId,
       noteId: input.noteId,
+      sourceJobId: input.sourceJobId,
       title: input.title,
       owner: input.owner,
       dueDate: input.dueDate,
@@ -472,6 +503,50 @@ export class LocalJsonStore {
   public listTasksByNote(tenantId: string, noteId: string): Task[] {
     const data = this.read();
     return data.tasks.filter((task) => task.tenantId === tenantId && task.noteId === noteId);
+  }
+
+  public replaceSuggestedTasksForJob(params: {
+    tenantId: string;
+    noteId: string;
+    jobId: string;
+    tasks: Array<{
+      title: string;
+      owner?: string;
+      dueDate?: string;
+      confidence: number;
+    }>;
+  }): Task[] {
+    const data = this.read();
+
+    data.tasks = data.tasks.filter(
+      (task) =>
+        !(
+          task.tenantId === params.tenantId &&
+          task.noteId === params.noteId &&
+          task.status === 'suggested' &&
+          task.sourceJobId === params.jobId
+        ),
+    );
+
+    const createdAt = nowIso();
+    const inserted: Task[] = params.tasks.map((task, index) => ({
+      id: `${params.jobId}:suggested:${String(index + 1).padStart(3, '0')}`,
+      tenantId: params.tenantId,
+      noteId: params.noteId,
+      sourceJobId: params.jobId,
+      title: task.title,
+      owner: task.owner,
+      dueDate: task.dueDate,
+      status: 'suggested',
+      confidence: task.confidence,
+      createdAt,
+      updatedAt: createdAt,
+    }));
+
+    data.tasks.push(...inserted);
+    this.write(data);
+
+    return inserted;
   }
 
   public listTasksByTenant(tenantId: string, status?: TaskStatus): Task[] {
@@ -522,7 +597,9 @@ export class LocalJsonStore {
       tenantId,
       noteId,
       status: 'queued',
+      attempts: 0,
       createdAt: now,
+      updatedAt: now,
     };
 
     return this.upsertJob(job);
@@ -557,9 +634,73 @@ export class LocalJsonStore {
 
     next.lockedAt = nowIso();
     next.status = 'processing';
+    next.updatedAt = nowIso();
     this.write(data);
 
     return next;
+  }
+
+  public markJobCompleted(jobId: string): Job | undefined {
+    const data = this.read();
+    const index = data.jobs.findIndex((job) => job.id === jobId);
+    if (index === -1) {
+      return undefined;
+    }
+
+    const existing = data.jobs[index];
+    if (!existing) {
+      return undefined;
+    }
+
+    const now = nowIso();
+    const updated: Job = {
+      ...existing,
+      status: 'done',
+      lockedAt: undefined,
+      lastError: undefined,
+      completedAt: now,
+      updatedAt: now,
+    };
+
+    data.jobs[index] = updated;
+    this.write(data);
+
+    return updated;
+  }
+
+  public markJobAttemptFailed(jobId: string, errorMessage: string, maxAttempts = 3): Job | undefined {
+    const data = this.read();
+    const index = data.jobs.findIndex((job) => job.id === jobId);
+    if (index === -1) {
+      return undefined;
+    }
+
+    const existing = data.jobs[index];
+    if (!existing) {
+      return undefined;
+    }
+
+    const attempts = existing.attempts + 1;
+    const shouldFail = attempts >= maxAttempts;
+
+    const updated: Job = {
+      ...existing,
+      attempts,
+      lastError: errorMessage,
+      status: shouldFail ? 'failed' : 'queued',
+      lockedAt: undefined,
+      updatedAt: nowIso(),
+    };
+
+    data.jobs[index] = updated;
+    this.write(data);
+
+    return updated;
+  }
+
+  public getJobById(jobId: string): Job | undefined {
+    const data = this.read();
+    return data.jobs.find((job) => job.id === jobId);
   }
 
   public addAuditEvent(event: Omit<AuditEvent, 'id' | 'createdAt'>): AuditEvent {
@@ -609,8 +750,15 @@ export class LocalJsonStore {
       users: parsed.users ?? [],
       memberships: parsed.memberships ?? [],
       notes: parsed.notes ?? [],
-      tasks: parsed.tasks ?? [],
-      jobs: parsed.jobs ?? [],
+      tasks: (parsed.tasks ?? []).map((task) => ({
+        ...task,
+        sourceJobId: task.sourceJobId,
+      })),
+      jobs: (parsed.jobs ?? []).map((job) => ({
+        ...job,
+        attempts: job.attempts ?? 0,
+        updatedAt: job.updatedAt ?? job.createdAt ?? nowIso(),
+      })),
       auditEvents: parsed.auditEvents ?? [],
     };
   }

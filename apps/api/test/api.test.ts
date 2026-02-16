@@ -1,13 +1,16 @@
 import { rmSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { getDefaultDataDir, LocalJsonStore } from '@meeting-action-extractor/db';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { buildApiApp } from '../src/app.js';
 
+const TEST_DATA_DIR = join(getDefaultDataDir(), 'api-test');
+
 const setupStore = (): LocalJsonStore => {
-  rmSync(getDefaultDataDir(), { force: true, recursive: true });
-  const store = new LocalJsonStore(getDefaultDataDir());
+  rmSync(TEST_DATA_DIR, { force: true, recursive: true });
+  const store = new LocalJsonStore(TEST_DATA_DIR);
 
   store.upsertTenant({ id: 'tenant-a', name: 'Tenant A' });
   store.upsertTenant({ id: 'tenant-b', name: 'Tenant B' });
@@ -41,7 +44,7 @@ const authHeaders = (params: {
 
 describe('API integration', () => {
   beforeEach(() => {
-    rmSync(getDefaultDataDir(), { force: true, recursive: true });
+    rmSync(TEST_DATA_DIR, { force: true, recursive: true });
   });
 
   it('rejects missing tenant headers in production mode', async () => {

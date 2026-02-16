@@ -4,7 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "once": "tsx src/index.ts once",
+    "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint \"src/**/*.ts\""
+    "lint": "eslint \"src/**/*.ts\" \"test/**/*.ts\""
+  },
+  "dependencies": {
+    "@meeting-action-extractor/db": "workspace:*",
+    "@meeting-action-extractor/extractor": "workspace:*"
   }
 }

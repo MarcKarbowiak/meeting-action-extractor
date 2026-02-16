@@ -92,11 +92,11 @@ Azure infrastructure is documented but not required to run locally.
 - [x] Audit event logging
 
 ### Phase 4 — Worker
-- [ ] Job polling loop
-- [ ] Retry logic (max 3 attempts)
-- [ ] Dead-letter handling
-- [ ] Rules-based extraction provider
-- [ ] Audit events for job lifecycle
+- [x] Job polling loop
+- [x] Retry logic (max 3 attempts)
+- [x] Dead-letter handling
+- [x] Rules-based extraction provider
+- [x] Audit events for job lifecycle
 
 ### Phase 5 — Web
 - [ ] Tenant selector
@@ -119,7 +119,7 @@ Azure infrastructure is documented but not required to run locally.
 
 ## Current Status
 
-- Repo initialized: Yes (Phase 1, Phase 2, and Phase 3 complete)
+- Repo initialized: Yes (Phase 1, Phase 2, Phase 3, and Phase 4 complete)
 - Last green commit: Local workspace checks passed (lint + typecheck + test)
 - Known issues: None
 
@@ -127,10 +127,10 @@ Azure infrastructure is documented but not required to run locally.
 
 ## Next Up
 
-Begin Phase 4 — Worker.
+Begin Phase 5 — Web.
 
-After Phase 4 completion:
+After Phase 5 completion:
 - Update this file
-- Mark Phase 4 complete
-- Move Phase 5 to active
+- Mark Phase 5 complete
+- Move Phase 6 to active
 

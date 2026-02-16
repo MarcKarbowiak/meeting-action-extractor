@@ -59,7 +59,9 @@ const seed = (): void => {
     tenantId: DEMO_TENANT_ID,
     noteId: SAMPLE_NOTE_ID,
     status: 'queued',
+    attempts: 0,
     createdAt: now,
+    updatedAt: now,
   });
 
   console.log('Seed complete: Demo tenant, users, memberships, sample note, and queued job are present.');
