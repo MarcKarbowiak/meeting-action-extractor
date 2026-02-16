@@ -55,6 +55,22 @@ export const buildApiApp = (options: BuildApiAppOptions = {}): FastifyInstance =
     },
   });
 
+  app.removeContentTypeParser('application/json');
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (_request, body, done) => {
+    const rawBody = typeof body === 'string' ? body : '';
+
+    if (rawBody.trim() === '') {
+      done(null, {});
+      return;
+    }
+
+    try {
+      done(null, JSON.parse(rawBody));
+    } catch {
+      done(new ApiError(400, 'bad_request', 'Malformed JSON body.'), undefined);
+    }
+  });
+
   // Enable CORS for web app
   app.register(cors, {
     origin: ['http://localhost:5173'],
@@ -272,6 +288,54 @@ export const buildApiApp = (options: BuildApiAppOptions = {}): FastifyInstance =
 
     return {
       tasks: store.listTasksByNote(auth.tenantId, note.id),
+    };
+  });
+
+  app.delete('/notes/:id', async (request) => {
+    const auth = getAuth(request);
+    requireRole(auth, 'member');
+
+    const params = parseOrThrow(
+      z.object({
+        id: z.string().min(1),
+      }),
+      request.params,
+    );
+
+    const note = store.getNoteByIdForTenant(auth.tenantId, params.id);
+    if (!note) {
+      throw new ApiError(404, 'not_found', 'Note not found.');
+    }
+
+    const deleted = store.deleteNoteForTenant(auth.tenantId, params.id);
+    if (!deleted) {
+      throw new ApiError(404, 'not_found', 'Note not found.');
+    }
+
+    store.addAuditEvent({
+      tenantId: auth.tenantId,
+      actorUserId: auth.userId,
+      action: 'note.deleted',
+      entityType: 'note',
+      entityId: params.id,
+      details: {
+        title: note.title,
+      },
+    });
+
+    request.log.info(
+      {
+        requestId: request.id,
+        tenantId: auth.tenantId,
+        userId: auth.userId,
+        noteId: params.id,
+      },
+      'audit.note.deleted',
+    );
+
+    return {
+      deleted: true,
+      noteId: params.id,
     };
   });
 

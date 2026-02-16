@@ -4,6 +4,7 @@ import {
   Paper,
   Typography,
   Button,
+  IconButton,
   Table,
   TableBody,
   TableCell,
@@ -14,7 +15,7 @@ import {
   Stack,
   Chip,
 } from '@mui/material';
-import { Add as AddIcon } from '@mui/icons-material';
+import { Add as AddIcon, Delete as DeleteIcon } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { apiClient, ApiError } from '../api/client.js';
 import { useNotification } from '../context/NotificationContext.js';
@@ -31,29 +32,30 @@ const statusColors: Record<string, 'default' | 'info' | 'success' | 'error'> = {
   failed: 'error',
 };
 
-export const NotesListPage = (): JSX.Element => {
+const NotesListPage = (): JSX.Element => {
   const [notes, setNotes] = useState<ApiNote[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deletingNoteId, setDeletingNoteId] = useState<string | null>(null);
   const navigate = useNavigate();
-  const { showError } = useNotification();
+  const { showError, showSuccess } = useNotification();
+
+  const loadNotes = async () => {
+    try {
+      setLoading(true);
+      const response = await apiClient.getNotes();
+      setNotes(response.notes);
+    } catch (error) {
+      if (error instanceof ApiError) {
+        showError(`Failed to load notes: ${error.message}`);
+      } else {
+        showError('Failed to load notes');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const loadNotes = async () => {
-      try {
-        setLoading(true);
-        const response = await apiClient.getNotes();
-        setNotes(response.notes);
-      } catch (error) {
-        if (error instanceof ApiError) {
-          showError(`Failed to load notes: ${error.message}`);
-        } else {
-          showError('Failed to load notes');
-        }
-      } finally {
-        setLoading(false);
-      }
-    };
-
     loadNotes();
   }, [showError]);
 
@@ -63,6 +65,30 @@ export const NotesListPage = (): JSX.Element => {
 
   const handleNewNote = () => {
     navigate('/notes/new');
+  };
+
+  const handleDeleteNote = async (event: React.MouseEvent, noteId: string) => {
+    event.stopPropagation();
+
+    const shouldDelete = window.confirm('Delete this meeting note? This also removes related tasks and jobs.');
+    if (!shouldDelete) {
+      return;
+    }
+
+    try {
+      setDeletingNoteId(noteId);
+      await apiClient.deleteNote(noteId);
+      showSuccess('Meeting note deleted');
+      await loadNotes();
+    } catch (error) {
+      if (error instanceof ApiError) {
+        showError(`Failed to delete note: ${error.message}`);
+      } else {
+        showError('Failed to delete note');
+      }
+    } finally {
+      setDeletingNoteId(null);
+    }
   };
 
   if (loading) {
@@ -99,6 +125,7 @@ export const NotesListPage = (): JSX.Element => {
                 <TableCell>Title</TableCell>
                 <TableCell>Status</TableCell>
                 <TableCell>Created</TableCell>
+                <TableCell align="right">Actions</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -114,6 +141,16 @@ export const NotesListPage = (): JSX.Element => {
                     <Chip label={note.status} color={statusColors[note.status] || 'default'} size="small" />
                   </TableCell>
                   <TableCell>{formatDate(note.createdAt)}</TableCell>
+                  <TableCell align="right">
+                    <IconButton
+                      aria-label="Delete meeting note"
+                      color="error"
+                      onClick={(event) => handleDeleteNote(event, note.id)}
+                      disabled={deletingNoteId === note.id}
+                    >
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -123,3 +160,6 @@ export const NotesListPage = (): JSX.Element => {
     </Stack>
   );
 };
+
+export { NotesListPage };
+export default NotesListPage;

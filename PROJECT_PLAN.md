@@ -111,16 +111,16 @@ Azure infrastructure is documented but not required to run locally.
 - [x] GitHub Actions workflow
 
 ### Phase 7 — Azure Reference Docs + IaC Skeleton Polish
-- [ ] docs/architecture/local-vs-azure.md
-- [ ] infra/azure IaC skeleton refinement
-- [ ] Security / no-secrets policy verification
-- [ ] Final Azure reference runbook
+- [x] docs/architecture/local-vs-azure.md
+- [x] infra/azure IaC skeleton refinement
+- [x] Security / no-secrets policy verification
+- [x] Final Azure reference runbook
 
 ---
 
 ## Current Status
 
-- Repo initialized: Yes (Phase 1 through Phase 6 complete)
+- Repo initialized: Yes (Phase 1 through Phase 7 complete)
 - Last green commit: Local workspace checks passed (lint + typecheck + test)
 - Known issues: None
 
@@ -128,5 +128,13 @@ Azure infrastructure is documented but not required to run locally.
 
 ## Next Up
 
-Begin Phase 7 — Azure reference docs + IaC skeleton polish.
+Maintain and iterate through future enhancements.
+
+---
+
+## Future Enhancements
+
+- Replace local JSON store in Azure mode with production Cosmos adapter implementation
+- Add Microsoft Entra External ID authentication for tenant user sign-in
+- Add end-to-end distributed tracing with Application Insights + OpenTelemetry correlation
 

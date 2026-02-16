@@ -1,0 +1,10 @@
+subscription_id = "00000000-0000-0000-0000-000000000000"
+location        = "eastus"
+environment     = "dev"
+name_prefix     = "mea"
+
+tags = {
+  project = "meeting-action-extractor"
+  owner   = "platform-team"
+  env     = "dev"
+}

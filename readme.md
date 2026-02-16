@@ -71,6 +71,17 @@ FOLLOW UP: Review performance improvement plan with HR
 - Document quarterly objectives
 ```
 
+## Azure Mode (Reference)
+
+Azure Mode is documentation + IaC skeleton only. It is designed for architecture reviews and deployment planning.
+
+- Architecture mapping: [docs/architecture/local-vs-azure.md](docs/architecture/local-vs-azure.md)
+- Azure reference topology: [docs/architecture/azure-reference-architecture.md](docs/architecture/azure-reference-architecture.md)
+- IaC skeleton: [infra/azure](infra/azure)
+- Azure deployment notes: [infra/azure/README.md](infra/azure/README.md)
+
+Local Mode remains the default and requires **no cloud setup** for lint, typecheck, tests, or demo walkthroughs.
+
 ## Quick Start
 
 ### 1. Install Dependencies

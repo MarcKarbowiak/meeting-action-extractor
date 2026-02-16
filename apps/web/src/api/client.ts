@@ -41,10 +41,12 @@ const getDevHeaders = (): DevHeaders | null => {
   }
 };
 
-const buildHeaders = (): Record<string, string> => {
-  const headers: Record<string, string> = {
-    'content-type': 'application/json',
-  };
+const buildHeaders = (includeJsonContentType = false): Record<string, string> => {
+  const headers: Record<string, string> = {};
+
+  if (includeJsonContentType) {
+    headers['content-type'] = 'application/json';
+  }
 
   const devHeaders = getDevHeaders();
   if (devHeaders) {
@@ -115,10 +117,19 @@ export const apiClient = {
   async createNote(data: { title: string; rawText: string }): Promise<CreateNoteResponse> {
     const response = await fetch(`${getBaseUrl()}/notes`, {
       method: 'POST',
-      headers: buildHeaders(),
+      headers: buildHeaders(true),
       body: JSON.stringify(data),
     });
     return handleResponse<CreateNoteResponse>(response);
+  },
+
+  async deleteNote(noteId: string): Promise<{ deleted: boolean; noteId: string }> {
+    const response = await fetch(`${getBaseUrl()}/notes/${noteId}`, {
+      method: 'DELETE',
+      headers: buildHeaders(),
+    });
+
+    return handleResponse<{ deleted: boolean; noteId: string }>(response);
   },
 
   async updateTask(taskId: string, data: {
@@ -129,7 +140,7 @@ export const apiClient = {
   }): Promise<UpdateTaskResponse> {
     const response = await fetch(`${getBaseUrl()}/tasks/${taskId}`, {
       method: 'PATCH',
-      headers: buildHeaders(),
+      headers: buildHeaders(true),
       body: JSON.stringify(data),
     });
     return handleResponse<UpdateTaskResponse>(response);

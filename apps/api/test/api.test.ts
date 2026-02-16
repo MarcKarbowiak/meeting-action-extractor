@@ -190,4 +190,113 @@ describe('API integration', () => {
 
     await app.close();
   });
+
+  it('allows deleting a note for the same tenant and blocks cross-tenant delete', async () => {
+    const store = setupStore();
+    const app = buildApiApp({ mode: 'test', store });
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/notes',
+      headers: authHeaders({
+        tenantId: 'tenant-a',
+        userId: 'user-member-a',
+        email: 'member-a@demo.local',
+        roles: 'member',
+      }),
+      payload: {
+        title: 'Delete me',
+        rawText: 'ACTION: delete test note',
+      },
+    });
+
+    expect(created.statusCode).toBe(200);
+    const noteId = created.json().note.id as string;
+
+    const crossTenantDelete = await app.inject({
+      method: 'DELETE',
+      url: `/notes/${noteId}`,
+      headers: authHeaders({
+        tenantId: 'tenant-b',
+        userId: 'user-admin-b',
+        email: 'admin-b@demo.local',
+        roles: 'admin',
+      }),
+    });
+
+    expect(crossTenantDelete.statusCode).toBe(404);
+
+    const ownTenantDelete = await app.inject({
+      method: 'DELETE',
+      url: `/notes/${noteId}`,
+      headers: authHeaders({
+        tenantId: 'tenant-a',
+        userId: 'user-member-a',
+        email: 'member-a@demo.local',
+        roles: 'member',
+      }),
+    });
+
+    expect(ownTenantDelete.statusCode).toBe(200);
+    expect(ownTenantDelete.json()).toEqual({
+      deleted: true,
+      noteId,
+    });
+
+    const readDeleted = await app.inject({
+      method: 'GET',
+      url: `/notes/${noteId}`,
+      headers: authHeaders({
+        tenantId: 'tenant-a',
+        userId: 'user-member-a',
+        email: 'member-a@demo.local',
+        roles: 'member',
+      }),
+    });
+
+    expect(readDeleted.statusCode).toBe(404);
+
+    await app.close();
+  });
+
+  it('accepts DELETE with application/json header and empty body', async () => {
+    const store = setupStore();
+    const app = buildApiApp({ mode: 'test', store });
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/notes',
+      headers: authHeaders({
+        tenantId: 'tenant-a',
+        userId: 'user-member-a',
+        email: 'member-a@demo.local',
+        roles: 'member',
+      }),
+      payload: {
+        title: 'Delete with json header',
+        rawText: 'ACTION: delete',
+      },
+    });
+
+    expect(created.statusCode).toBe(200);
+    const noteId = created.json().note.id as string;
+
+    const response = await app.inject({
+      method: 'DELETE',
+      url: `/notes/${noteId}`,
+      headers: {
+        ...authHeaders({
+          tenantId: 'tenant-a',
+          userId: 'user-member-a',
+          email: 'member-a@demo.local',
+          roles: 'member',
+        }),
+        'content-type': 'application/json',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+
+    await app.close();
+  });
 });

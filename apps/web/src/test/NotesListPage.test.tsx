@@ -24,7 +24,7 @@ vi.mock('../api/client.js', () => ({
 describe('NotesListPage', () => {
   it('should render without crashing', async () => {
     render(
-      <BrowserRouter>
+      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <NotificationProvider>
           <NotesListPage />
         </NotificationProvider>

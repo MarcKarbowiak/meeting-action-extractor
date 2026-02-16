@@ -83,6 +83,52 @@ describe('API Client', () => {
 
       expect(capturedHeaders['x-tenant-id']).toBeUndefined();
       expect(capturedHeaders['x-user-id']).toBeUndefined();
+      expect(capturedHeaders['content-type']).toBeUndefined();
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  it('should include json content-type for requests with body', async () => {
+    localStorage.removeItem('dev-context');
+
+    let capturedHeaders: Record<string, string> = {};
+    const originalFetch = global.fetch;
+    global.fetch = async (url: string | URL | Request, init?: RequestInit) => {
+      if (init?.headers) {
+        capturedHeaders = init.headers as Record<string, string>;
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          note: {
+            id: 'n1',
+            tenantId: 't1',
+            title: 'Title',
+            rawText: 'Raw',
+            status: 'submitted',
+            createdBy: 'u1',
+            createdAt: new Date().toISOString(),
+          },
+          job: {
+            id: 'j1',
+            tenantId: 't1',
+            noteId: 'n1',
+            status: 'queued',
+            attempts: 0,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          },
+        }),
+      } as Response;
+    };
+
+    try {
+      await apiClient.createNote({
+        title: 'Title',
+        rawText: 'Raw',
+      });
+
       expect(capturedHeaders['content-type']).toBe('application/json');
     } finally {
       global.fetch = originalFetch;

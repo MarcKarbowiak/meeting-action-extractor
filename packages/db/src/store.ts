@@ -434,6 +434,22 @@ export class LocalJsonStore {
     return data.notes.find((note) => note.id === noteId && note.tenantId === tenantId);
   }
 
+  public deleteNoteForTenant(tenantId: string, noteId: string): boolean {
+    const data = this.read();
+    const noteIndex = data.notes.findIndex((note) => note.id === noteId && note.tenantId === tenantId);
+
+    if (noteIndex === -1) {
+      return false;
+    }
+
+    data.notes.splice(noteIndex, 1);
+    data.tasks = data.tasks.filter((task) => !(task.tenantId === tenantId && task.noteId === noteId));
+    data.jobs = data.jobs.filter((job) => !(job.tenantId === tenantId && job.noteId === noteId));
+
+    this.write(data);
+    return true;
+  }
+
   public setNoteStatus(tenantId: string, noteId: string, status: NoteStatus): Note | undefined {
     const data = this.read();
     const index = data.notes.findIndex((note) => note.id === noteId && note.tenantId === tenantId);
