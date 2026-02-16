@@ -84,12 +84,12 @@ Azure infrastructure is documented but not required to run locally.
 - [x] Repository abstraction layer
 
 ### Phase 3 — API
-- [ ] Auth/tenant middleware
-- [ ] RBAC guards
-- [ ] Tenants endpoints
-- [ ] Notes endpoints
-- [ ] Tasks endpoints
-- [ ] Audit event logging
+- [x] Auth/tenant middleware
+- [x] RBAC guards
+- [x] Tenants endpoints
+- [x] Notes endpoints
+- [x] Tasks endpoints
+- [x] Audit event logging
 
 ### Phase 4 — Worker
 - [ ] Job polling loop
@@ -119,7 +119,7 @@ Azure infrastructure is documented but not required to run locally.
 
 ## Current Status
 
-- Repo initialized: Yes (Phase 1 and Phase 2 complete)
+- Repo initialized: Yes (Phase 1, Phase 2, and Phase 3 complete)
 - Last green commit: Local workspace checks passed (lint + typecheck + test)
 - Known issues: None
 
@@ -127,10 +127,10 @@ Azure infrastructure is documented but not required to run locally.
 
 ## Next Up
 
-Begin Phase 3 — API.
+Begin Phase 4 — Worker.
 
-After Phase 3 completion:
+After Phase 4 completion:
 - Update this file
-- Mark Phase 3 complete
-- Move Phase 4 to active
+- Mark Phase 4 complete
+- Move Phase 5 to active
 

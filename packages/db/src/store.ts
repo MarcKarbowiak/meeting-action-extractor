@@ -6,24 +6,48 @@ export type Role = 'admin' | 'member' | 'reader';
 export type Tenant = {
   id: string;
   name: string;
+  createdAt: string;
 };
 
 export type User = {
   id: string;
   email: string;
+  displayName: string;
+  createdAt: string;
 };
 
 export type Membership = {
   tenantId: string;
   userId: string;
   role: Role;
+  createdAt: string;
 };
+
+export type NoteStatus = 'submitted';
 
 export type Note = {
   id: string;
   tenantId: string;
-  content: string;
+  title: string;
+  rawText: string;
+  status: NoteStatus;
+  createdBy: string;
   createdAt: string;
+};
+
+export type TaskStatus = 'suggested' | 'approved' | 'rejected';
+
+export type Task = {
+  id: string;
+  tenantId: string;
+  noteId: string;
+  title: string;
+  owner?: string;
+  dueDate?: string;
+  status: TaskStatus;
+  confidence: number;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type JobStatus = 'queued' | 'processing' | 'done' | 'failed';
@@ -37,12 +61,59 @@ export type Job = {
   lockedAt?: string;
 };
 
-type StoreData = {
+export type AuditEvent = {
+  id: string;
+  tenantId: string;
+  actorUserId: string;
+  action: string;
+  entityType: 'tenant' | 'note' | 'task' | 'membership';
+  entityId: string;
+  details?: Record<string, string>;
+  createdAt: string;
+};
+
+export type TenantSummary = {
+  id: string;
+  name: string;
+  role: Role;
+};
+
+export type TenantMember = {
+  userId: string;
+  email: string;
+  displayName: string;
+  role: Role;
+};
+
+export type CreateTenantInput = {
+  name: string;
+  creatorUserId: string;
+  creatorEmail: string;
+  creatorDisplayName?: string;
+};
+
+export type CreateNoteInput = {
+  tenantId: string;
+  title: string;
+  rawText: string;
+  createdBy: string;
+};
+
+export type UpdateTaskInput = {
+  status: TaskStatus;
+  title?: string;
+  owner?: string;
+  dueDate?: string;
+};
+
+export type StoreData = {
   tenants: Tenant[];
   users: User[];
   memberships: Membership[];
   notes: Note[];
+  tasks: Task[];
   jobs: Job[];
+  auditEvents: AuditEvent[];
 };
 
 const EMPTY_DATA: StoreData = {
@@ -50,13 +121,20 @@ const EMPTY_DATA: StoreData = {
   users: [],
   memberships: [],
   notes: [],
+  tasks: [],
   jobs: [],
+  auditEvents: [],
 };
 
 const STORE_FILE_NAME = 'store.json';
 
-const createId = (): string => {
-  return globalThis.crypto.randomUUID();
+const createId = (): string => globalThis.crypto.randomUUID();
+
+const nowIso = (): string => new Date().toISOString();
+
+const fallbackDisplayName = (email: string): string => {
+  const name = email.split('@')[0] ?? 'user';
+  return name;
 };
 
 export const findWorkspaceRoot = (startDir = process.cwd()): string => {
@@ -81,7 +159,7 @@ export const getDefaultDataDir = (): string => {
   return join(findWorkspaceRoot(), '.local-data');
 };
 
-export class LocalFileStore {
+export class LocalJsonStore {
   private readonly filePath: string;
 
   constructor(private readonly dataDir = getDefaultDataDir()) {
@@ -100,35 +178,98 @@ export class LocalFileStore {
     this.write(EMPTY_DATA);
   }
 
-  public upsertTenant(input: Tenant): Tenant {
+  public createTenantWithAdmin(input: CreateTenantInput): Tenant {
     const data = this.read();
-    const index = data.tenants.findIndex((tenant) => tenant.id === input.id);
 
+    const creator = this.upsertUserInternal(data, {
+      id: input.creatorUserId,
+      email: input.creatorEmail,
+      displayName: input.creatorDisplayName ?? fallbackDisplayName(input.creatorEmail),
+      createdAt: nowIso(),
+    });
+
+    const tenant: Tenant = {
+      id: createId(),
+      name: input.name,
+      createdAt: nowIso(),
+    };
+
+    data.tenants.push(tenant);
+
+    this.upsertMembershipInternal(data, {
+      tenantId: tenant.id,
+      userId: creator.id,
+      role: 'admin',
+      createdAt: nowIso(),
+    });
+
+    this.write(data);
+    return tenant;
+  }
+
+  public upsertTenant(input: Omit<Tenant, 'createdAt'> & Partial<Pick<Tenant, 'createdAt'>>): Tenant {
+    const data = this.read();
+    const tenant: Tenant = {
+      id: input.id,
+      name: input.name,
+      createdAt: input.createdAt ?? nowIso(),
+    };
+
+    const index = data.tenants.findIndex((value) => value.id === tenant.id);
     if (index === -1) {
-      data.tenants.push(input);
+      data.tenants.push(tenant);
     } else {
-      data.tenants[index] = input;
+      data.tenants[index] = tenant;
     }
 
     this.write(data);
-    return input;
+    return tenant;
   }
 
-  public upsertUser(input: User): User {
+  public listTenantsForUser(userId: string): TenantSummary[] {
     const data = this.read();
-    const index = data.users.findIndex((user) => user.id === input.id || user.email === input.email);
+    const memberships = data.memberships.filter((membership) => membership.userId === userId);
 
-    if (index === -1) {
-      data.users.push(input);
-    } else {
-      data.users[index] = { ...data.users[index], ...input };
-    }
+    return memberships
+      .map((membership) => {
+        const tenant = data.tenants.find((value) => value.id === membership.tenantId);
+        if (!tenant) {
+          return undefined;
+        }
+
+        return {
+          id: tenant.id,
+          name: tenant.name,
+          role: membership.role,
+        } satisfies TenantSummary;
+      })
+      .filter((value): value is TenantSummary => value !== undefined);
+  }
+
+  public upsertUser(input: Omit<User, 'displayName' | 'createdAt'> & Partial<Pick<User, 'displayName' | 'createdAt'>>): User {
+    const data = this.read();
+    const user = this.upsertUserInternal(data, {
+      id: input.id,
+      email: input.email,
+      displayName: input.displayName ?? fallbackDisplayName(input.email),
+      createdAt: input.createdAt ?? nowIso(),
+    });
 
     this.write(data);
-    return input;
+    return user;
   }
 
-  public addMembership(input: Membership): Membership {
+  public getUserById(userId: string): User | undefined {
+    const data = this.read();
+    return data.users.find((user) => user.id === userId);
+  }
+
+  public getUserByEmail(email: string): User | undefined {
+    const data = this.read();
+    return data.users.find((user) => user.email.toLowerCase() === email.toLowerCase());
+  }
+
+  public addMembership(input: Omit<Membership, 'createdAt'> & Partial<Pick<Membership, 'createdAt'>>): Membership {
     const data = this.read();
     const duplicate = data.memberships.some(
       (membership) =>
@@ -139,57 +280,148 @@ export class LocalFileStore {
       throw new Error('Membership already exists for this tenant and user.');
     }
 
-    data.memberships.push(input);
-    this.write(data);
-    return input;
-  }
-
-  public upsertMembership(input: Membership): Membership {
-    const data = this.read();
-    const index = data.memberships.findIndex(
-      (membership) =>
-        membership.tenantId === input.tenantId && membership.userId === input.userId,
-    );
-
-    if (index === -1) {
-      data.memberships.push(input);
-    } else {
-      data.memberships[index] = input;
-    }
-
-    this.write(data);
-    return input;
-  }
-
-  public createNote(tenantId: string, content: string): Note {
-    const now = new Date().toISOString();
-    const note: Note = {
-      id: createId(),
-      tenantId,
-      content,
-      createdAt: now,
+    const membership: Membership = {
+      tenantId: input.tenantId,
+      userId: input.userId,
+      role: input.role,
+      createdAt: input.createdAt ?? nowIso(),
     };
 
-    return this.upsertNote(note);
+    data.memberships.push(membership);
+    this.write(data);
+    return membership;
   }
 
-  public upsertNote(input: Note): Note {
+  public upsertMembership(input: Omit<Membership, 'createdAt'> & Partial<Pick<Membership, 'createdAt'>>): Membership {
     const data = this.read();
-    const index = data.notes.findIndex((note) => note.id === input.id);
+    const membership = this.upsertMembershipInternal(data, {
+      tenantId: input.tenantId,
+      userId: input.userId,
+      role: input.role,
+      createdAt: input.createdAt ?? nowIso(),
+    });
 
+    this.write(data);
+    return membership;
+  }
+
+  public getMembership(tenantId: string, userId: string): Membership | undefined {
+    const data = this.read();
+    return data.memberships.find(
+      (membership) => membership.tenantId === tenantId && membership.userId === userId,
+    );
+  }
+
+  public upsertMemberByEmail(tenantId: string, email: string, role: Role): TenantMember {
+    const data = this.read();
+    const tenant = data.tenants.find((value) => value.id === tenantId);
+    if (!tenant) {
+      throw new Error('Tenant not found.');
+    }
+
+    const existing = data.users.find((user) => user.email.toLowerCase() === email.toLowerCase());
+    const user = existing
+      ? this.upsertUserInternal(data, {
+          ...existing,
+          email,
+        })
+      : this.upsertUserInternal(data, {
+          id: createId(),
+          email,
+          displayName: fallbackDisplayName(email),
+          createdAt: nowIso(),
+        });
+
+    const membership = this.upsertMembershipInternal(data, {
+      tenantId,
+      userId: user.id,
+      role,
+      createdAt: nowIso(),
+    });
+
+    this.write(data);
+
+    return {
+      userId: user.id,
+      email: user.email,
+      displayName: user.displayName,
+      role: membership.role,
+    };
+  }
+
+  public listMembersByTenant(tenantId: string): TenantMember[] {
+    const data = this.read();
+    const memberships = data.memberships.filter((membership) => membership.tenantId === tenantId);
+
+    return memberships
+      .map((membership) => {
+        const user = data.users.find((value) => value.id === membership.userId);
+        if (!user) {
+          return undefined;
+        }
+
+        return {
+          userId: user.id,
+          email: user.email,
+          displayName: user.displayName,
+          role: membership.role,
+        } satisfies TenantMember;
+      })
+      .filter((value): value is TenantMember => value !== undefined);
+  }
+
+  public createNote(input: CreateNoteInput | string, legacyRawText?: string): Note {
+    if (typeof input === 'string') {
+      const tenantId = input;
+      const rawText = legacyRawText ?? '';
+      return this.createSubmittedNote({
+        tenantId,
+        title: 'Untitled note',
+        rawText,
+        createdBy: 'system',
+      });
+    }
+
+    return this.createSubmittedNote(input);
+  }
+
+  public createSubmittedNoteAndEnqueueJob(input: CreateNoteInput): { note: Note; job: Job } {
+    const note = this.createSubmittedNote(input);
+    const job = this.enqueueJob(input.tenantId, note.id);
+
+    return { note, job };
+  }
+
+  public upsertNote(input: Omit<Note, 'createdAt'> & Partial<Pick<Note, 'createdAt'>>): Note {
+    const data = this.read();
+    const note: Note = {
+      id: input.id,
+      tenantId: input.tenantId,
+      title: input.title,
+      rawText: input.rawText,
+      status: input.status,
+      createdBy: input.createdBy,
+      createdAt: input.createdAt ?? nowIso(),
+    };
+
+    const index = data.notes.findIndex((value) => value.id === note.id);
     if (index === -1) {
-      data.notes.push(input);
+      data.notes.push(note);
     } else {
-      data.notes[index] = input;
+      data.notes[index] = note;
     }
 
     this.write(data);
-    return input;
+    return note;
   }
 
-  public listNotesByTenant(tenantId: string): Note[] {
+  public listNotesByTenant(tenantId: string, limit?: number, offset?: number): Note[] {
     const data = this.read();
-    return data.notes.filter((note) => note.tenantId === tenantId);
+    const filtered = data.notes.filter((note) => note.tenantId === tenantId);
+    const start = offset ?? 0;
+    const end = limit === undefined ? undefined : start + limit;
+
+    return filtered.slice(start, end);
   }
 
   public getNoteByIdForTenant(tenantId: string, noteId: string): Note | undefined {
@@ -197,8 +429,94 @@ export class LocalFileStore {
     return data.notes.find((note) => note.id === noteId && note.tenantId === tenantId);
   }
 
+  public createTask(input: {
+    tenantId: string;
+    noteId: string;
+    title: string;
+    owner?: string;
+    dueDate?: string;
+    status?: TaskStatus;
+    confidence?: number;
+  }): Task {
+    const now = nowIso();
+    const task: Task = {
+      id: createId(),
+      tenantId: input.tenantId,
+      noteId: input.noteId,
+      title: input.title,
+      owner: input.owner,
+      dueDate: input.dueDate,
+      status: input.status ?? 'suggested',
+      confidence: input.confidence ?? 0,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    return this.upsertTask(task);
+  }
+
+  public upsertTask(input: Task): Task {
+    const data = this.read();
+    const index = data.tasks.findIndex((task) => task.id === input.id);
+
+    if (index === -1) {
+      data.tasks.push(input);
+    } else {
+      data.tasks[index] = input;
+    }
+
+    this.write(data);
+    return input;
+  }
+
+  public listTasksByNote(tenantId: string, noteId: string): Task[] {
+    const data = this.read();
+    return data.tasks.filter((task) => task.tenantId === tenantId && task.noteId === noteId);
+  }
+
+  public listTasksByTenant(tenantId: string, status?: TaskStatus): Task[] {
+    const data = this.read();
+
+    return data.tasks.filter(
+      (task) => task.tenantId === tenantId && (status === undefined || task.status === status),
+    );
+  }
+
+  public getTaskByIdForTenant(tenantId: string, taskId: string): Task | undefined {
+    const data = this.read();
+    return data.tasks.find((task) => task.id === taskId && task.tenantId === tenantId);
+  }
+
+  public updateTaskForTenant(tenantId: string, taskId: string, patch: UpdateTaskInput): Task | undefined {
+    const data = this.read();
+    const index = data.tasks.findIndex((task) => task.id === taskId && task.tenantId === tenantId);
+
+    if (index === -1) {
+      return undefined;
+    }
+
+    const existing = data.tasks[index];
+    if (!existing) {
+      return undefined;
+    }
+
+    const updated: Task = {
+      ...existing,
+      status: patch.status,
+      title: patch.title ?? existing.title,
+      owner: patch.owner ?? existing.owner,
+      dueDate: patch.dueDate ?? existing.dueDate,
+      updatedAt: nowIso(),
+    };
+
+    data.tasks[index] = updated;
+    this.write(data);
+
+    return updated;
+  }
+
   public enqueueJob(tenantId: string, noteId: string): Job {
-    const now = new Date().toISOString();
+    const now = nowIso();
     const job: Job = {
       id: createId(),
       tenantId,
@@ -237,15 +555,44 @@ export class LocalFileStore {
       return undefined;
     }
 
-    next.lockedAt = new Date().toISOString();
+    next.lockedAt = nowIso();
     next.status = 'processing';
     this.write(data);
 
     return next;
   }
 
+  public addAuditEvent(event: Omit<AuditEvent, 'id' | 'createdAt'>): AuditEvent {
+    const data = this.read();
+    const value: AuditEvent = {
+      id: createId(),
+      createdAt: nowIso(),
+      ...event,
+    };
+
+    data.auditEvents.push(value);
+    this.write(data);
+
+    return value;
+  }
+
   public getSnapshot(): StoreData {
     return this.read();
+  }
+
+  private createSubmittedNote(input: CreateNoteInput): Note {
+    const now = nowIso();
+    const note: Note = {
+      id: createId(),
+      tenantId: input.tenantId,
+      title: input.title,
+      rawText: input.rawText,
+      status: 'submitted',
+      createdBy: input.createdBy,
+      createdAt: now,
+    };
+
+    return this.upsertNote(note);
   }
 
   private ensureDir(): void {
@@ -255,14 +602,16 @@ export class LocalFileStore {
   private read(): StoreData {
     this.initialize();
     const raw = readFileSync(this.filePath, 'utf-8');
-    const parsed = JSON.parse(raw) as StoreData;
+    const parsed = JSON.parse(raw) as Partial<StoreData>;
 
     return {
       tenants: parsed.tenants ?? [],
       users: parsed.users ?? [],
       memberships: parsed.memberships ?? [],
       notes: parsed.notes ?? [],
+      tasks: parsed.tasks ?? [],
       jobs: parsed.jobs ?? [],
+      auditEvents: parsed.auditEvents ?? [],
     };
   }
 
@@ -270,4 +619,61 @@ export class LocalFileStore {
     this.ensureDir();
     writeFileSync(this.filePath, `${JSON.stringify(data, null, 2)}\n`, 'utf-8');
   }
+
+  private upsertUserInternal(data: StoreData, input: User): User {
+    const index = data.users.findIndex(
+      (user) => user.id === input.id || user.email.toLowerCase() === input.email.toLowerCase(),
+    );
+
+    if (index === -1) {
+      data.users.push(input);
+      return input;
+    }
+
+    const existing = data.users[index];
+    if (!existing) {
+      data.users.push(input);
+      return input;
+    }
+
+    const merged: User = {
+      ...existing,
+      id: input.id,
+      email: input.email,
+      displayName: input.displayName,
+      createdAt: existing.createdAt,
+    };
+
+    data.users[index] = merged;
+    return merged;
+  }
+
+  private upsertMembershipInternal(data: StoreData, input: Membership): Membership {
+    const index = data.memberships.findIndex(
+      (membership) =>
+        membership.tenantId === input.tenantId && membership.userId === input.userId,
+    );
+
+    if (index === -1) {
+      data.memberships.push(input);
+      return input;
+    }
+
+    const existing = data.memberships[index];
+    if (!existing) {
+      data.memberships.push(input);
+      return input;
+    }
+
+    const merged: Membership = {
+      ...existing,
+      role: input.role,
+      createdAt: existing.createdAt,
+    };
+
+    data.memberships[index] = merged;
+    return merged;
+  }
 }
+
+export class LocalFileStore extends LocalJsonStore {}

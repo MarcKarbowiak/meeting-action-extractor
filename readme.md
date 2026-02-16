@@ -48,6 +48,47 @@ Target design includes App Service + Functions + Key Vault + Managed Identity.
 3. Start local database:
    - `docker compose up`
 
+## API (Phase 3)
+
+Start API locally:
+
+- `pnpm dev`
+
+Default API address:
+
+- `http://localhost:3000`
+
+### Dev Auth Headers
+
+Local mode uses request headers for auth context:
+
+- `x-tenant-id`
+- `x-user-id`
+- `x-user-email`
+- `x-user-roles` (comma-separated: `admin`, `member`, `reader`)
+
+If headers are missing and mode is not production, API falls back to seeded demo context.
+In production mode, missing headers return `401`.
+
+### JWT Adapter Placeholder (Azure)
+
+A placeholder adapter exists at [apps/api/src/auth/JwtAuthAdapter.ts](apps/api/src/auth/JwtAuthAdapter.ts).
+This is where Azure JWT validation will be implemented later.
+
+### Example curl Commands
+
+Health:
+
+- `curl -H "x-tenant-id: tenant-demo" -H "x-user-id: user-admin-demo" -H "x-user-email: admin@demo.local" -H "x-user-roles: admin" http://localhost:3000/health`
+
+Create note:
+
+- `curl -X POST http://localhost:3000/notes -H "content-type: application/json" -H "x-tenant-id: tenant-demo" -H "x-user-id: user-member-demo" -H "x-user-email: member@demo.local" -H "x-user-roles: member" -d "{\"title\":\"Weekly Sync\",\"rawText\":\"Need follow-up on budget approvals\"}"`
+
+List tasks as CSV:
+
+- `curl -L -H "x-tenant-id: tenant-demo" -H "x-user-id: user-member-demo" -H "x-user-email: member@demo.local" -H "x-user-roles: member" "http://localhost:3000/tasks/export.csv?status=approved"`
+
 ## Local Store and Azure Cosmos Mapping
 
 The local store is intentionally simple and deterministic so tests run without network access.
