@@ -60,4 +60,44 @@ describe('LocalFileStore', () => {
     expect(firstLock?.status).toBe('processing');
     expect(secondLock).toBeUndefined();
   });
+
+  it('deletes a note and cascades related tasks and jobs (tenant-scoped)', () => {
+    const store = new LocalFileStore(TEST_DATA_DIR);
+
+    const noteA = store.createNote('tenant-a', 'Note A');
+    const jobA = store.enqueueJob('tenant-a', noteA.id);
+    const taskA1 = store.createTask({
+      tenantId: 'tenant-a',
+      noteId: noteA.id,
+      title: 'Task A1',
+      status: 'suggested',
+      confidence: 0.5,
+    });
+
+    const noteB = store.createNote('tenant-b', 'Note B');
+    const jobB = store.enqueueJob('tenant-b', noteB.id);
+    const taskB1 = store.createTask({
+      tenantId: 'tenant-b',
+      noteId: noteB.id,
+      title: 'Task B1',
+      status: 'suggested',
+      confidence: 0.5,
+    });
+
+    expect(store.getNoteByIdForTenant('tenant-a', noteA.id)).toBeDefined();
+    expect(store.getJobById(jobA.id)).toBeDefined();
+    expect(store.listTasksByNote('tenant-a', noteA.id).some((task) => task.id === taskA1.id)).toBe(true);
+
+    const deleted = store.deleteNoteForTenant('tenant-a', noteA.id);
+    expect(deleted).toBe(true);
+
+    expect(store.getNoteByIdForTenant('tenant-a', noteA.id)).toBeUndefined();
+    expect(store.listTasksByNote('tenant-a', noteA.id)).toHaveLength(0);
+    expect(store.getJobById(jobA.id)).toBeUndefined();
+
+    // Other tenant remains intact.
+    expect(store.getNoteByIdForTenant('tenant-b', noteB.id)).toBeDefined();
+    expect(store.getJobById(jobB.id)).toBeDefined();
+    expect(store.listTasksByNote('tenant-b', noteB.id).some((task) => task.id === taskB1.id)).toBe(true);
+  });
 });

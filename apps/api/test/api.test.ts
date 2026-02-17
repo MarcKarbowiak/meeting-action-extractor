@@ -299,4 +299,179 @@ describe('API integration', () => {
 
     await app.close();
   });
+
+  it('enforces tenant isolation for tasks list', async () => {
+    const store = setupStore();
+
+    const tenantANote = store.createNote({
+      tenantId: 'tenant-a',
+      title: 'Tenant A note',
+      rawText: 'A',
+      createdBy: 'user-member-a',
+    });
+    store.createTask({
+      tenantId: 'tenant-a',
+      noteId: tenantANote.id,
+      title: 'Tenant A task',
+      owner: 'Owner A',
+      status: 'suggested',
+      confidence: 0.5,
+    });
+
+    const tenantBNote = store.createNote({
+      tenantId: 'tenant-b',
+      title: 'Tenant B note',
+      rawText: 'B',
+      createdBy: 'user-admin-b',
+    });
+    store.createTask({
+      tenantId: 'tenant-b',
+      noteId: tenantBNote.id,
+      title: 'Tenant B task',
+      owner: 'Owner B',
+      status: 'suggested',
+      confidence: 0.5,
+    });
+
+    const app = buildApiApp({ mode: 'test', store });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/tasks',
+      headers: authHeaders({
+        tenantId: 'tenant-a',
+        userId: 'user-member-a',
+        email: 'member-a@demo.local',
+        roles: 'member',
+      }),
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.tasks).toHaveLength(1);
+    expect(body.tasks[0].title).toBe('Tenant A task');
+
+    await app.close();
+  });
+
+  it('enforces RBAC and tenant isolation for task updates', async () => {
+    const store = setupStore();
+
+    const note = store.createNote({
+      tenantId: 'tenant-a',
+      title: 'Update task note',
+      rawText: 'A',
+      createdBy: 'user-member-a',
+    });
+
+    const task = store.createTask({
+      tenantId: 'tenant-a',
+      noteId: note.id,
+      title: 'Task to update',
+      status: 'suggested',
+      confidence: 0.5,
+    });
+
+    const app = buildApiApp({ mode: 'test', store });
+
+    const readerPatch = await app.inject({
+      method: 'PATCH',
+      url: `/tasks/${task.id}`,
+      headers: authHeaders({
+        tenantId: 'tenant-a',
+        userId: 'user-reader-a',
+        email: 'reader-a@demo.local',
+        roles: 'reader',
+      }),
+      payload: {
+        status: 'approved',
+      },
+    });
+
+    expect(readerPatch.statusCode).toBe(403);
+
+    const crossTenantPatch = await app.inject({
+      method: 'PATCH',
+      url: `/tasks/${task.id}`,
+      headers: authHeaders({
+        tenantId: 'tenant-b',
+        userId: 'user-admin-b',
+        email: 'admin-b@demo.local',
+        roles: 'admin',
+      }),
+      payload: {
+        status: 'approved',
+      },
+    });
+
+    expect(crossTenantPatch.statusCode).toBe(404);
+
+    const ownTenantPatch = await app.inject({
+      method: 'PATCH',
+      url: `/tasks/${task.id}`,
+      headers: authHeaders({
+        tenantId: 'tenant-a',
+        userId: 'user-member-a',
+        email: 'member-a@demo.local',
+        roles: 'member',
+      }),
+      payload: {
+        status: 'approved',
+      },
+    });
+
+    expect(ownTenantPatch.statusCode).toBe(200);
+    expect(ownTenantPatch.json().task.status).toBe('approved');
+
+    await app.close();
+  });
+
+  it('enforces RBAC and tenant scope for members list', async () => {
+    const store = setupStore();
+    const app = buildApiApp({ mode: 'test', store });
+
+    const memberDenied = await app.inject({
+      method: 'GET',
+      url: '/tenants/tenant-a/members',
+      headers: authHeaders({
+        tenantId: 'tenant-a',
+        userId: 'user-member-a',
+        email: 'member-a@demo.local',
+        roles: 'member',
+      }),
+    });
+
+    expect(memberDenied.statusCode).toBe(403);
+
+    const crossTenantDenied = await app.inject({
+      method: 'GET',
+      url: '/tenants/tenant-a/members',
+      headers: authHeaders({
+        tenantId: 'tenant-b',
+        userId: 'user-admin-b',
+        email: 'admin-b@demo.local',
+        roles: 'admin',
+      }),
+    });
+
+    expect(crossTenantDenied.statusCode).toBe(404);
+
+    const ownTenantAllowed = await app.inject({
+      method: 'GET',
+      url: '/tenants/tenant-a/members',
+      headers: authHeaders({
+        tenantId: 'tenant-a',
+        userId: 'user-admin-a',
+        email: 'admin-a@demo.local',
+        roles: 'admin',
+      }),
+    });
+
+    expect(ownTenantAllowed.statusCode).toBe(200);
+    const body = ownTenantAllowed.json();
+    expect(Array.isArray(body.members)).toBe(true);
+    expect(body.members.some((member: { userId: string }) => member.userId === 'user-admin-a')).toBe(true);
+
+    await app.close();
+  });
 });

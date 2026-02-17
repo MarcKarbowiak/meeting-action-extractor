@@ -1,4 +1,5 @@
 # meeting-action-extractor
+![CI](https://github.com/MarcKarbowiak/meeting-action-extractor/actions/workflows/ci.yml/badge.svg)
 
 Local-first, multi-tenant reference implementation for extracting structured action items from meeting notes.
 
@@ -17,58 +18,7 @@ Local Mode runs fully offline with no cloud dependencies.
 
 ## Architecture Overview
 
-```mermaid
-flowchart TD
-
-%% =========================
-%% Local Mode (Default)
-%% =========================
-
-subgraph Local_Mode["Local Mode (Zero Infrastructure)"]
-
-    Web["Web UI<br/>(React + MUI)"]
-    API["API<br/>(Fastify)"]
-    Store["Store Interface<br/>(Document-Oriented)"]
-    LocalJSON["Local JSON Store<br/>(.local-data/)"]
-    Worker["Worker<br/>(Async Job Processor)"]
-    Extractor["Rules Extraction Provider"]
-    Tasks["Tasks<br/>(Suggested → Approved)"]
-
-    Web --> API
-    API --> Store
-    Store --> LocalJSON
-
-    API -->|enqueue job| Worker
-    Worker --> Extractor
-    Extractor -->|generate tasks| Store
-    Store --> Tasks
-end
-
-%% =========================
-%% Azure Mode (Reference)
-%% =========================
-
-subgraph Azure_Mode["Azure Mode (Reference Architecture)"]
-
-    AppService["App Service<br/>(API)"]
-    FunctionApp["Function App<br/>(Worker)"]
-    Cosmos["Cosmos DB<br/>(Partition Key: tenantId)"]
-    KeyVault["Key Vault<br/>(Managed Identity)"]
-    AppInsights["Application Insights"]
-
-    AppService --> Cosmos
-    FunctionApp --> Cosmos
-    AppService --> KeyVault
-    FunctionApp --> KeyVault
-    AppService --> AppInsights
-    FunctionApp --> AppInsights
-end
-
-%% Alignment Arrows
-API -.aligned with.-> AppService
-Worker -.aligned with.-> FunctionApp
-LocalJSON -.interface compatible.-> Cosmos
-```
+![Architecture Overview](docs/architecture/architecture-overview.png)
 
 ## Quick Demo (< 10 minutes)
 
