@@ -26,11 +26,13 @@ import {
   Cancel as RejectIcon,
   Edit as EditIcon,
   FileDownload as DownloadIcon,
+  Delete as DeleteIcon,
 } from '@mui/icons-material';
 import { useNavigate, useParams } from 'react-router-dom';
 import { apiClient, ApiError } from '../api/client.js';
 import { useNotification } from '../context/NotificationContext.js';
 import type { ApiNote, ApiTask } from '../api/types.js';
+import { hasAdminRole, loadDevContext } from '../dev-context.js';
 
 const taskStatusColors: Record<string, 'default' | 'success' | 'error'> = {
   suggested: 'default',
@@ -123,8 +125,12 @@ export const NoteDetailsPage = (): JSX.Element => {
   const [tasks, setTasks] = useState<ApiTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [editTask, setEditTask] = useState<ApiTask | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const navigate = useNavigate();
   const { showError, showSuccess } = useNotification();
+  const devContext = loadDevContext();
+  const canDeleteNote = hasAdminRole(devContext) && devContext.allowDeleteNotes === true;
 
   const loadData = async () => {
     if (!id) return;
@@ -227,6 +233,28 @@ export const NoteDetailsPage = (): JSX.Element => {
     }
   };
 
+  const handleConfirmDelete = async () => {
+    if (!id) {
+      return;
+    }
+
+    try {
+      setDeleting(true);
+      await apiClient.deleteNote(id);
+      showSuccess('Meeting note deleted');
+      navigate('/notes');
+    } catch (error) {
+      if (error instanceof ApiError) {
+        showError(`Failed to delete note: ${error.message}`);
+      } else {
+        showError('Failed to delete note');
+      }
+    } finally {
+      setDeleting(false);
+      setDeleteDialogOpen(false);
+    }
+  };
+
   if (loading) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 300 }}>
@@ -257,6 +285,16 @@ export const NoteDetailsPage = (): JSX.Element => {
         <Typography variant="h5" sx={{ flex: 1 }}>
           {note.title}
         </Typography>
+        {canDeleteNote && (
+          <Button
+            variant="outlined"
+            color="error"
+            startIcon={<DeleteIcon />}
+            onClick={() => setDeleteDialogOpen(true)}
+          >
+            Delete Note
+          </Button>
+        )}
         <Button variant="outlined" startIcon={<DownloadIcon />} onClick={handleExportCsv}>
           Export CSV
         </Button>
@@ -361,6 +399,30 @@ export const NoteDetailsPage = (): JSX.Element => {
         onClose={() => setEditTask(null)}
         onSave={handleSaveEdit}
       />
+
+      <Dialog
+        open={deleteDialogOpen}
+        onClose={() => {
+          if (!deleting) {
+            setDeleteDialogOpen(false);
+          }
+        }}
+      >
+        <DialogTitle>Delete note?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2">
+            This permanently deletes the note and all associated tasks and jobs.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteDialogOpen(false)} disabled={deleting}>
+            Cancel
+          </Button>
+          <Button color="error" variant="contained" onClick={handleConfirmDelete} disabled={deleting}>
+            {deleting ? 'Deleting...' : 'Delete'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Stack>
   );
 };

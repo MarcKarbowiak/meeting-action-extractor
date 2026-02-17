@@ -1,6 +1,14 @@
-import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import cors from '@fastify/cors';
 import type { LocalJsonStore, Role } from '@meeting-action-extractor/db';
+import {
+  buildSpanAttributes,
+  getFlag,
+  getTracer,
+  parseEnvFlags,
+  parseHeaderFlags,
+  runWithSpan,
+} from '@meeting-action-extractor/shared';
 import { z, ZodError, type ZodType } from 'zod';
 
 import { deriveAuthContext } from './auth.js';
@@ -43,6 +51,50 @@ const getAuth = (request: FastifyRequest): AuthContext => {
   }
 
   return auth;
+};
+
+const apiTracer = getTracer('api');
+
+const getHeaderValue = (value: string | string[] | undefined): string | undefined => {
+  if (Array.isArray(value)) {
+    return value[0];
+  }
+
+  return value;
+};
+
+const getFlagContext = (request: FastifyRequest, auth?: AuthContext) => {
+  const environment = process.env.NODE_ENV ?? 'local';
+
+  return {
+    environment,
+    tenantId: auth?.tenantId,
+    userId: auth?.userId,
+    roles: auth?.roles,
+    envFlags: parseEnvFlags(),
+    headerFlags: parseHeaderFlags(getHeaderValue(request.headers['x-feature-flags'])),
+  };
+};
+
+const withRequestSpan = (
+  routeName: string,
+  handler: (request: FastifyRequest, reply: FastifyReply) => Promise<unknown> | unknown,
+) => {
+  return async (request: FastifyRequest, reply: FastifyReply) => {
+    const auth = (request as RequestWithAuth).authContext;
+
+    return runWithSpan({
+      tracer: apiTracer,
+      name: routeName,
+      attributes: buildSpanAttributes({
+        deploymentEnvironment: process.env.NODE_ENV ?? 'local',
+        requestId: request.id,
+        tenantId: auth?.tenantId,
+        userId: auth?.userId,
+      }),
+      run: async () => handler(request, reply),
+    });
+  };
 };
 
 export const buildApiApp = (options: BuildApiAppOptions = {}): FastifyInstance => {
@@ -118,15 +170,15 @@ export const buildApiApp = (options: BuildApiAppOptions = {}): FastifyInstance =
       .send(toApiErrorPayload(new ApiError(500, 'internal_error', 'Unexpected server error.')));
   });
 
-  app.get('/health', async () => {
+  app.get('/health', withRequestSpan('GET /health', async () => {
     return {
       status: 'ok',
       version: '0.1.0',
       mode,
     };
-  });
+  }));
 
-  app.get('/me', async (request) => {
+  app.get('/me', withRequestSpan('GET /me', async (request) => {
     const auth = getAuth(request);
 
     return {
@@ -138,16 +190,27 @@ export const buildApiApp = (options: BuildApiAppOptions = {}): FastifyInstance =
       tenantId: auth.tenantId,
       roles: auth.roles,
     };
-  });
+  }));
 
-  app.get('/tenants', async (request) => {
+  app.get('/tenants', withRequestSpan('GET /tenants', async (request) => {
     const auth = getAuth(request);
-    return {
-      tenants: store.listTenantsForUser(auth.userId),
-    };
-  });
 
-  app.post('/tenants', async (request) => {
+    const tenants = await runWithSpan({
+      tracer: apiTracer,
+      name: 'store.tenants.list_for_user',
+      attributes: buildSpanAttributes({
+        tenantId: auth.tenantId,
+        userId: auth.userId,
+      }),
+      run: () => store.listTenantsForUser(auth.userId),
+    });
+
+    return {
+      tenants,
+    };
+  }));
+
+  app.post('/tenants', withRequestSpan('POST /tenants', async (request) => {
     const auth = getAuth(request);
     requireRole(auth, 'member');
 
@@ -158,22 +221,39 @@ export const buildApiApp = (options: BuildApiAppOptions = {}): FastifyInstance =
       request.body,
     );
 
-    const tenant = store.createTenantWithAdmin({
-      name: body.name,
-      creatorUserId: auth.userId,
-      creatorEmail: auth.email,
-      creatorDisplayName: auth.displayName,
+    const tenant = await runWithSpan({
+      tracer: apiTracer,
+      name: 'store.tenants.create',
+      attributes: buildSpanAttributes({
+        userId: auth.userId,
+      }),
+      run: () =>
+        store.createTenantWithAdmin({
+          name: body.name,
+          creatorUserId: auth.userId,
+          creatorEmail: auth.email,
+          creatorDisplayName: auth.displayName,
+        }),
     });
 
-    store.addAuditEvent({
-      tenantId: tenant.id,
-      actorUserId: auth.userId,
-      action: 'tenant.created',
-      entityType: 'tenant',
-      entityId: tenant.id,
-      details: {
-        name: tenant.name,
-      },
+    await runWithSpan({
+      tracer: apiTracer,
+      name: 'store.audit.write',
+      attributes: buildSpanAttributes({
+        tenantId: tenant.id,
+        userId: auth.userId,
+      }),
+      run: () =>
+        store.addAuditEvent({
+          tenantId: tenant.id,
+          actorUserId: auth.userId,
+          action: 'tenant.created',
+          entityType: 'tenant',
+          entityId: tenant.id,
+          details: {
+            name: tenant.name,
+          },
+        }),
     });
 
     request.log.info(
@@ -188,9 +268,9 @@ export const buildApiApp = (options: BuildApiAppOptions = {}): FastifyInstance =
     return {
       tenant,
     };
-  });
+  }));
 
-  app.post('/notes', async (request) => {
+  app.post('/notes', withRequestSpan('POST /notes', async (request) => {
     const auth = getAuth(request);
     requireRole(auth, 'member');
 
@@ -202,22 +282,53 @@ export const buildApiApp = (options: BuildApiAppOptions = {}): FastifyInstance =
       request.body,
     );
 
-    const result = store.createSubmittedNoteAndEnqueueJob({
-      tenantId: auth.tenantId,
-      title: body.title,
-      rawText: body.rawText,
-      createdBy: auth.userId,
+    const note = await runWithSpan({
+      tracer: apiTracer,
+      name: 'store.notes.create',
+      attributes: buildSpanAttributes({
+        tenantId: auth.tenantId,
+        userId: auth.userId,
+      }),
+      run: () =>
+        store.createNote({
+          tenantId: auth.tenantId,
+          title: body.title,
+          rawText: body.rawText,
+          createdBy: auth.userId,
+        }),
     });
 
-    store.addAuditEvent({
-      tenantId: auth.tenantId,
-      actorUserId: auth.userId,
-      action: 'note.submitted',
-      entityType: 'note',
-      entityId: result.note.id,
-      details: {
-        jobId: result.job.id,
-      },
+    const job = await runWithSpan({
+      tracer: apiTracer,
+      name: 'store.jobs.enqueue',
+      attributes: buildSpanAttributes({
+        tenantId: auth.tenantId,
+        userId: auth.userId,
+        noteId: note.id,
+      }),
+      run: () => store.enqueueJob(auth.tenantId, note.id),
+    });
+
+    await runWithSpan({
+      tracer: apiTracer,
+      name: 'store.audit.write',
+      attributes: buildSpanAttributes({
+        tenantId: auth.tenantId,
+        userId: auth.userId,
+        noteId: note.id,
+        jobId: job.id,
+      }),
+      run: () =>
+        store.addAuditEvent({
+          tenantId: auth.tenantId,
+          actorUserId: auth.userId,
+          action: 'note.submitted',
+          entityType: 'note',
+          entityId: note.id,
+          details: {
+            jobId: job.id,
+          },
+        }),
     });
 
     request.log.info(
@@ -225,19 +336,19 @@ export const buildApiApp = (options: BuildApiAppOptions = {}): FastifyInstance =
         requestId: request.id,
         tenantId: auth.tenantId,
         userId: auth.userId,
-        noteId: result.note.id,
-        jobId: result.job.id,
+        noteId: note.id,
+        jobId: job.id,
       },
       'audit.note.submitted',
     );
 
     return {
-      note: result.note,
-      job: result.job,
+      note,
+      job,
     };
-  });
+  }));
 
-  app.get('/notes', async (request) => {
+  app.get('/notes', withRequestSpan('GET /notes', async (request) => {
     const auth = getAuth(request);
 
     const query = parseOrThrow(
@@ -248,12 +359,22 @@ export const buildApiApp = (options: BuildApiAppOptions = {}): FastifyInstance =
       request.query,
     );
 
-    return {
-      notes: store.listNotesByTenant(auth.tenantId, query.limit, query.offset),
-    };
-  });
+    const notes = await runWithSpan({
+      tracer: apiTracer,
+      name: 'store.notes.list',
+      attributes: buildSpanAttributes({
+        tenantId: auth.tenantId,
+        userId: auth.userId,
+      }),
+      run: () => store.listNotesByTenant(auth.tenantId, query.limit, query.offset),
+    });
 
-  app.get('/notes/:id', async (request) => {
+    return {
+      notes,
+    };
+  }));
+
+  app.get('/notes/:id', withRequestSpan('GET /notes/:id', async (request) => {
     const auth = getAuth(request);
 
     const params = parseOrThrow(
@@ -263,15 +384,24 @@ export const buildApiApp = (options: BuildApiAppOptions = {}): FastifyInstance =
       request.params,
     );
 
-    const note = store.getNoteByIdForTenant(auth.tenantId, params.id);
+    const note = await runWithSpan({
+      tracer: apiTracer,
+      name: 'store.notes.get',
+      attributes: buildSpanAttributes({
+        tenantId: auth.tenantId,
+        userId: auth.userId,
+        noteId: params.id,
+      }),
+      run: () => store.getNoteByIdForTenant(auth.tenantId, params.id),
+    });
     if (!note) {
       throw new ApiError(404, 'not_found', 'Note not found.');
     }
 
     return { note };
-  });
+  }));
 
-  app.get('/notes/:id/tasks', async (request) => {
+  app.get('/notes/:id/tasks', withRequestSpan('GET /notes/:id/tasks', async (request) => {
     const auth = getAuth(request);
 
     const params = parseOrThrow(
@@ -281,19 +411,45 @@ export const buildApiApp = (options: BuildApiAppOptions = {}): FastifyInstance =
       request.params,
     );
 
-    const note = store.getNoteByIdForTenant(auth.tenantId, params.id);
+    const note = await runWithSpan({
+      tracer: apiTracer,
+      name: 'store.notes.get',
+      attributes: buildSpanAttributes({
+        tenantId: auth.tenantId,
+        userId: auth.userId,
+        noteId: params.id,
+      }),
+      run: () => store.getNoteByIdForTenant(auth.tenantId, params.id),
+    });
     if (!note) {
       throw new ApiError(404, 'not_found', 'Note not found.');
     }
+
+    const tasks = await runWithSpan({
+      tracer: apiTracer,
+      name: 'store.tasks.list_by_note',
+      attributes: buildSpanAttributes({
+        tenantId: auth.tenantId,
+        userId: auth.userId,
+        noteId: note.id,
+      }),
+      run: () => store.listTasksByNote(auth.tenantId, note.id),
+    });
 
     return {
-      tasks: store.listTasksByNote(auth.tenantId, note.id),
+      tasks,
     };
-  });
+  }));
 
-  app.delete('/notes/:id', async (request) => {
+  app.delete('/notes/:id', withRequestSpan('DELETE /notes/:id', async (request) => {
     const auth = getAuth(request);
-    requireRole(auth, 'member');
+
+    const allowDelete = getFlag('notes.allowDelete', getFlagContext(request, auth)) === true;
+    if (!allowDelete) {
+      throw new ApiError(404, 'not_found', 'Note not found.');
+    }
+
+    requireRole(auth, 'admin');
 
     const params = parseOrThrow(
       z.object({
@@ -302,25 +458,53 @@ export const buildApiApp = (options: BuildApiAppOptions = {}): FastifyInstance =
       request.params,
     );
 
-    const note = store.getNoteByIdForTenant(auth.tenantId, params.id);
+    const note = await runWithSpan({
+      tracer: apiTracer,
+      name: 'store.notes.get',
+      attributes: buildSpanAttributes({
+        tenantId: auth.tenantId,
+        userId: auth.userId,
+        noteId: params.id,
+      }),
+      run: () => store.getNoteByIdForTenant(auth.tenantId, params.id),
+    });
     if (!note) {
       throw new ApiError(404, 'not_found', 'Note not found.');
     }
 
-    const deleted = store.deleteNoteForTenant(auth.tenantId, params.id);
+    const deleted = await runWithSpan({
+      tracer: apiTracer,
+      name: 'store.notes.delete',
+      attributes: buildSpanAttributes({
+        tenantId: auth.tenantId,
+        userId: auth.userId,
+        noteId: params.id,
+      }),
+      run: () => store.deleteNoteForTenant(auth.tenantId, params.id),
+    });
     if (!deleted) {
       throw new ApiError(404, 'not_found', 'Note not found.');
     }
 
-    store.addAuditEvent({
-      tenantId: auth.tenantId,
-      actorUserId: auth.userId,
-      action: 'note.deleted',
-      entityType: 'note',
-      entityId: params.id,
-      details: {
-        title: note.title,
-      },
+    await runWithSpan({
+      tracer: apiTracer,
+      name: 'store.audit.write',
+      attributes: buildSpanAttributes({
+        tenantId: auth.tenantId,
+        userId: auth.userId,
+        noteId: params.id,
+      }),
+      run: () =>
+        store.addAuditEvent({
+          tenantId: auth.tenantId,
+          actorUserId: auth.userId,
+          action: 'note_deleted',
+          entityType: 'note',
+          entityId: params.id,
+          details: {
+            title: note.title,
+          },
+        }),
     });
 
     request.log.info(
@@ -337,9 +521,9 @@ export const buildApiApp = (options: BuildApiAppOptions = {}): FastifyInstance =
       deleted: true,
       noteId: params.id,
     };
-  });
+  }));
 
-  app.patch('/tasks/:id', async (request) => {
+  app.patch('/tasks/:id', withRequestSpan('PATCH /tasks/:id', async (request) => {
     const auth = getAuth(request);
     requireRole(auth, 'member');
 
@@ -360,20 +544,37 @@ export const buildApiApp = (options: BuildApiAppOptions = {}): FastifyInstance =
       request.body,
     );
 
-    const updated = store.updateTaskForTenant(auth.tenantId, params.id, body);
+    const updated = await runWithSpan({
+      tracer: apiTracer,
+      name: 'store.tasks.update',
+      attributes: buildSpanAttributes({
+        tenantId: auth.tenantId,
+        userId: auth.userId,
+      }),
+      run: () => store.updateTaskForTenant(auth.tenantId, params.id, body),
+    });
     if (!updated) {
       throw new ApiError(404, 'not_found', 'Task not found.');
     }
 
-    store.addAuditEvent({
-      tenantId: auth.tenantId,
-      actorUserId: auth.userId,
-      action: 'task.updated',
-      entityType: 'task',
-      entityId: updated.id,
-      details: {
-        status: updated.status,
-      },
+    await runWithSpan({
+      tracer: apiTracer,
+      name: 'store.audit.write',
+      attributes: buildSpanAttributes({
+        tenantId: auth.tenantId,
+        userId: auth.userId,
+      }),
+      run: () =>
+        store.addAuditEvent({
+          tenantId: auth.tenantId,
+          actorUserId: auth.userId,
+          action: 'task.updated',
+          entityType: 'task',
+          entityId: updated.id,
+          details: {
+            status: updated.status,
+          },
+        }),
     });
 
     request.log.info(
@@ -389,9 +590,9 @@ export const buildApiApp = (options: BuildApiAppOptions = {}): FastifyInstance =
     return {
       task: updated,
     };
-  });
+  }));
 
-  app.get('/tasks', async (request) => {
+  app.get('/tasks', withRequestSpan('GET /tasks', async (request) => {
     const auth = getAuth(request);
 
     const query = parseOrThrow(
@@ -400,13 +601,23 @@ export const buildApiApp = (options: BuildApiAppOptions = {}): FastifyInstance =
       }),
       request.query,
     );
+
+    const tasks = await runWithSpan({
+      tracer: apiTracer,
+      name: 'store.tasks.list',
+      attributes: buildSpanAttributes({
+        tenantId: auth.tenantId,
+        userId: auth.userId,
+      }),
+      run: () => store.listTasksByTenant(auth.tenantId, query.status),
+    });
 
     return {
-      tasks: store.listTasksByTenant(auth.tenantId, query.status),
+      tasks,
     };
-  });
+  }));
 
-  app.get('/tasks/export.csv', async (request, reply) => {
+  app.get('/tasks/export.csv', withRequestSpan('GET /tasks/export.csv', async (request, reply) => {
     const auth = getAuth(request);
 
     const query = parseOrThrow(
@@ -416,16 +627,24 @@ export const buildApiApp = (options: BuildApiAppOptions = {}): FastifyInstance =
       request.query,
     );
 
-    const tasks = store.listTasksByTenant(auth.tenantId, query.status);
+    const tasks = await runWithSpan({
+      tracer: apiTracer,
+      name: 'store.tasks.list',
+      attributes: buildSpanAttributes({
+        tenantId: auth.tenantId,
+        userId: auth.userId,
+      }),
+      run: () => store.listTasksByTenant(auth.tenantId, query.status),
+    });
     const csv = tasksToCsv(tasks);
 
     reply.header('content-type', 'text/csv; charset=utf-8');
     reply.header('content-disposition', 'attachment; filename="tasks.csv"');
 
     return reply.send(csv);
-  });
+  }));
 
-  app.get('/tenants/:id/members', async (request) => {
+  app.get('/tenants/:id/members', withRequestSpan('GET /tenants/:id/members', async (request) => {
     const auth = getAuth(request);
     requireRole(auth, 'admin');
 
@@ -438,12 +657,22 @@ export const buildApiApp = (options: BuildApiAppOptions = {}): FastifyInstance =
 
     assertTenantScope(auth, params.id);
 
-    return {
-      members: store.listMembersByTenant(params.id),
-    };
-  });
+    const members = await runWithSpan({
+      tracer: apiTracer,
+      name: 'store.members.list',
+      attributes: buildSpanAttributes({
+        tenantId: auth.tenantId,
+        userId: auth.userId,
+      }),
+      run: () => store.listMembersByTenant(params.id),
+    });
 
-  app.post('/tenants/:id/members', async (request) => {
+    return {
+      members,
+    };
+  }));
+
+  app.post('/tenants/:id/members', withRequestSpan('POST /tenants/:id/members', async (request) => {
     const auth = getAuth(request);
     requireRole(auth, 'admin');
 
@@ -464,18 +693,35 @@ export const buildApiApp = (options: BuildApiAppOptions = {}): FastifyInstance =
       request.body,
     );
 
-    const member = store.upsertMemberByEmail(params.id, body.email, body.role as Role);
+    const member = await runWithSpan({
+      tracer: apiTracer,
+      name: 'store.members.upsert',
+      attributes: buildSpanAttributes({
+        tenantId: auth.tenantId,
+        userId: auth.userId,
+      }),
+      run: () => store.upsertMemberByEmail(params.id, body.email, body.role as Role),
+    });
 
-    store.addAuditEvent({
-      tenantId: params.id,
-      actorUserId: auth.userId,
-      action: 'membership.upserted',
-      entityType: 'membership',
-      entityId: member.userId,
-      details: {
-        email: member.email,
-        role: member.role,
-      },
+    await runWithSpan({
+      tracer: apiTracer,
+      name: 'store.audit.write',
+      attributes: buildSpanAttributes({
+        tenantId: auth.tenantId,
+        userId: auth.userId,
+      }),
+      run: () =>
+        store.addAuditEvent({
+          tenantId: params.id,
+          actorUserId: auth.userId,
+          action: 'membership.upserted',
+          entityType: 'membership',
+          entityId: member.userId,
+          details: {
+            email: member.email,
+            role: member.role,
+          },
+        }),
     });
 
     request.log.info(
@@ -491,7 +737,7 @@ export const buildApiApp = (options: BuildApiAppOptions = {}): FastifyInstance =
     return {
       member,
     };
-  });
+  }));
 
   return app;
 };

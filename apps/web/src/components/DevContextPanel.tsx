@@ -1,31 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Box, Paper, TextField, Stack, Typography, Collapse, IconButton } from '@mui/material';
+import { Box, Paper, TextField, Stack, Typography, Collapse, IconButton, FormControlLabel, Checkbox } from '@mui/material';
 import { ExpandMore as ExpandMoreIcon } from '@mui/icons-material';
-
-type DevContext = {
-  tenantId: string;
-  userId: string;
-  email: string;
-  roles: string;
-};
-
-const loadDevContext = (): DevContext => {
-  try {
-    const stored = localStorage.getItem('dev-context');
-    if (stored) {
-      return JSON.parse(stored) as DevContext;
-    }
-  } catch {
-    // ignore
-  }
-
-  return {
-    tenantId: '',
-    userId: '',
-    email: '',
-    roles: 'member',
-  };
-};
+import { loadDevContext, type DevContext } from '../dev-context.js';
 
 export const DevContextPanel = (): JSX.Element => {
   const [context, setContext] = useState<DevContext>(loadDevContext);
@@ -39,6 +15,13 @@ export const DevContextPanel = (): JSX.Element => {
     setContext({
       ...context,
       [field]: event.target.value,
+    });
+  };
+
+  const handleToggleAllowDelete = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setContext({
+      ...context,
+      allowDeleteNotes: event.target.checked,
     });
   };
 
@@ -103,6 +86,15 @@ export const DevContextPanel = (): JSX.Element => {
               fullWidth
               size="small"
               placeholder="admin,member"
+            />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={context.allowDeleteNotes === true}
+                  onChange={handleToggleAllowDelete}
+                />
+              }
+              label="Allow Delete Notes (feature flag)"
             />
           </Stack>
         </Box>

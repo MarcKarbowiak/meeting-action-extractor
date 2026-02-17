@@ -443,11 +443,27 @@ export class LocalJsonStore {
     }
 
     data.notes.splice(noteIndex, 1);
-    data.tasks = data.tasks.filter((task) => !(task.tenantId === tenantId && task.noteId === noteId));
-    data.jobs = data.jobs.filter((job) => !(job.tenantId === tenantId && job.noteId === noteId));
+    this.deleteTasksForNoteInternal(data, tenantId, noteId);
+    this.deleteJobsForNoteInternal(data, tenantId, noteId);
 
     this.write(data);
     return true;
+  }
+
+  public deleteTasksForNote(tenantId: string, noteId: string): number {
+    const data = this.read();
+    const deletedCount = this.deleteTasksForNoteInternal(data, tenantId, noteId);
+    this.write(data);
+
+    return deletedCount;
+  }
+
+  public deleteJobsForNote(tenantId: string, noteId: string): number {
+    const data = this.read();
+    const deletedCount = this.deleteJobsForNoteInternal(data, tenantId, noteId);
+    this.write(data);
+
+    return deletedCount;
   }
 
   public setNoteStatus(tenantId: string, noteId: string, status: NoteStatus): Note | undefined {
@@ -810,6 +826,20 @@ export class LocalJsonStore {
 
     data.users[index] = merged;
     return merged;
+  }
+
+  private deleteTasksForNoteInternal(data: StoreData, tenantId: string, noteId: string): number {
+    const before = data.tasks.length;
+    data.tasks = data.tasks.filter((task) => !(task.tenantId === tenantId && task.noteId === noteId));
+
+    return before - data.tasks.length;
+  }
+
+  private deleteJobsForNoteInternal(data: StoreData, tenantId: string, noteId: string): number {
+    const before = data.jobs.length;
+    data.jobs = data.jobs.filter((job) => !(job.tenantId === tenantId && job.noteId === noteId));
+
+    return before - data.jobs.length;
   }
 
   private upsertMembershipInternal(data: StoreData, input: Membership): Membership {

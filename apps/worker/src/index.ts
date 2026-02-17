@@ -1,7 +1,18 @@
 import { getStore } from './store-provider.js';
 import { runOnce, startLoop } from './worker.js';
+import { getFlag, initTelemetry, parseEnvFlags } from '@meeting-action-extractor/shared';
 
 const main = async (): Promise<void> => {
+	const envFlags = parseEnvFlags();
+	const telemetryEnabled = getFlag('telemetry.enabled', {
+		environment: process.env.NODE_ENV ?? 'local',
+		envFlags,
+	}) === true;
+
+	if (telemetryEnabled) {
+		await initTelemetry({ serviceName: 'worker' });
+	}
+
 	const mode = process.argv[2] ?? 'loop';
 	const store = getStore();
 

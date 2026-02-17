@@ -74,6 +74,7 @@ Dev Context values in web UI:
 - User ID: `user-admin-demo`
 - Email: `admin@demo.local`
 - Roles: `admin,member`
+- Allow Delete Notes (feature flag): enabled (for controlled delete demo)
 
 Sample note:
 
@@ -96,6 +97,7 @@ Azure Mode is documentation + IaC skeleton only. It is designed for architecture
 - Architecture mapping: [docs/architecture/local-vs-azure.md](docs/architecture/local-vs-azure.md)
 - Azure reference topology: [docs/architecture/azure-reference-architecture.md](docs/architecture/azure-reference-architecture.md)
 - ADR index: [docs/architecture/adr_readme.md](docs/architecture/adr_readme.md)
+- Observability + feature flags: [docs/architecture/observability-feature-flags.md](docs/architecture/observability-feature-flags.md)
 - IaC skeleton: [infra/azure](infra/azure)
 - Azure deployment notes: [infra/azure/README.md](infra/azure/README.md)
 
@@ -253,6 +255,7 @@ Request headers for auth context:
 - `x-user-id` — User identifier
 - `x-user-email` — User email
 - `x-user-roles` — Comma-separated roles: `admin`, `member`, `reader`
+- `x-feature-flags` — Local feature overrides (example: `notes.allowDelete=true`)
 
 These headers are **development-mode only** and used for local demo auth context.
 
@@ -266,7 +269,7 @@ These headers are **development-mode only** and used for local demo auth context
 - `GET /notes` — List notes
 - `POST /notes` — Create note (member+)
 - `GET /notes/:id` — Get note details
-- `DELETE /notes/:id` — Delete note and related tasks/jobs (member+)
+- `DELETE /notes/:id` — Delete note and related tasks/jobs (admin + `notes.allowDelete=true`)
 - `GET /notes/:id/tasks` — Get tasks for note
 - `PATCH /tasks/:id` — Update task (member+)
 - `GET /tasks/export.csv?status=approved` — Export CSV
@@ -301,6 +304,42 @@ curl -H "x-tenant-id: tenant-demo" \
      -H "x-user-roles: member" \
      "http://localhost:3000/tasks/export.csv?status=approved"
 ```
+
+## Observability
+
+OpenTelemetry tracing is enabled for API and worker via shared initialization.
+
+- Default local exporter: console
+- Optional OTLP exporter: set `OTEL_EXPORTER=otlp` and `OTEL_EXPORTER_OTLP_ENDPOINT`
+- Key attributes: `tenantId`, `userId`, `requestId`, `jobId`, `noteId`
+
+Environment variables:
+
+- `OTEL_EXPORTER_OTLP_ENDPOINT`
+- `OTEL_EXPORTER` (`otlp` or `console`)
+- `OTEL_TRACES_SAMPLER`
+- `OTEL_RESOURCE_ATTRIBUTES`
+
+## Feature Flags
+
+Flag evaluation priority:
+
+1. `x-feature-flags` header (non-production only)
+2. `FEATURE_*` environment variables
+3. Hardcoded defaults
+
+Implemented flags:
+
+- `telemetry.enabled` (default `true`)
+- `extractor.provider` (default `rules`)
+- `notes.allowDelete` (default `false`)
+- `ui.devContextPanel` (default `true` in local)
+
+Controlled delete behavior:
+
+- `DELETE /notes/:id` is available only for admins when `notes.allowDelete=true`
+- If the delete flag is disabled, endpoint returns `404`
+- Delete removes the note plus tenant-scoped related tasks/jobs and writes `note_deleted` audit event
 
 ## Security & Best Practices
 

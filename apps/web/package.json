@@ -16,6 +16,7 @@
     "@emotion/styled": "^11.11.0",
     "@fontsource/roboto": "^5.0.8",
     "@meeting-action-extractor/db": "workspace:*",
+    "@meeting-action-extractor/shared": "workspace:*",
     "@mui/material": "^5.15.10",
     "@mui/icons-material": "^5.15.10",
     "react": "^18.2.0",

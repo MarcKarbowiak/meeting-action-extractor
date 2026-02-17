@@ -2,9 +2,10 @@ import { test, expect } from '@playwright/test';
 
 const devContext = {
   tenantId: 'tenant-demo',
-  userId: 'user-member-demo',
-  email: 'member@demo.local',
-  roles: 'member',
+  userId: 'user-admin-demo',
+  email: 'admin@demo.local',
+  roles: 'admin,member',
+  allowDeleteNotes: true,
 };
 
 test.beforeEach(async ({ page }) => {
@@ -24,7 +25,7 @@ test('seeded note is visible and row click navigates to details', async ({ page 
   await expect(page.getByRole('heading', { name: 'Q1 roadmap follow-up' })).toBeVisible();
 });
 
-test('create a note then delete it from the list', async ({ page }) => {
+test('create a note then delete it from note details', async ({ page }) => {
   const title = `E2E smoke note ${Date.now()}`;
 
   page.on('dialog', async (dialog) => {
@@ -41,14 +42,14 @@ test('create a note then delete it from the list', async ({ page }) => {
   await page.getByRole('button', { name: 'Submit Note' }).click();
 
   await expect(page.getByText('Note created successfully')).toBeVisible();
+  await expect(page).toHaveURL(/\/notes\//);
 
-  await page.goto('/notes');
-  await expect(page.getByText(title)).toBeVisible();
-
-  const row = page.locator('tr', { hasText: title });
-  await expect(row).toBeVisible();
-  await row.getByLabel('Delete meeting note').click();
+  await page.getByRole('button', { name: 'Delete Note' }).click();
+  await page.getByRole('button', { name: 'Delete' }).click();
 
   await expect(page.getByText('Meeting note deleted')).toBeVisible();
-  await expect(row).toHaveCount(0);
+  await expect(page).toHaveURL(/\/notes$/);
+
+  await page.goto('/notes');
+  await expect(page.getByText(title)).toHaveCount(0);
 });

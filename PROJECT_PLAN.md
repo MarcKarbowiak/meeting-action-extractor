@@ -116,11 +116,22 @@ Azure infrastructure is documented but not required to run locally.
 - [x] Security / no-secrets policy verification
 - [x] Final Azure reference runbook
 
+### Phase 8 — Observability + Feature Flags + Controlled Delete
+- [x] Shared OpenTelemetry bootstrap helper (`packages/shared/src/telemetry`)
+- [x] API route-level spans + child store/audit spans
+- [x] Worker deterministic job span structure
+- [x] Shared feature-flag module (`packages/shared/src/feature-flags`)
+- [x] Header/env/default flag resolution with production header-override protection
+- [x] Controlled delete gate (`admin` + `notes.allowDelete=true`)
+- [x] Dev Context panel flag toggle + request header propagation
+- [x] Telemetry + feature flag + delete behavior tests
+- [x] README + architecture documentation updates
+
 ---
 
 ## Current Status
 
-- Repo initialized: Yes (Phase 1 through Phase 7 complete)
+- Repo initialized: Yes (Phase 1 through Phase 8 complete)
 - Last green commit: Local workspace checks passed (lint + typecheck + test)
 - Known issues: None
 

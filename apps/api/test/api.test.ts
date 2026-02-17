@@ -33,13 +33,23 @@ const authHeaders = (params: {
   userId: string;
   email: string;
   roles: string;
+  featureFlags?: string;
 }): Record<string, string> => {
-  return {
+  const headers = {
     'x-tenant-id': params.tenantId,
     'x-user-id': params.userId,
     'x-user-email': params.email,
     'x-user-roles': params.roles,
   };
+
+  if (params.featureFlags) {
+    return {
+      ...headers,
+      'x-feature-flags': params.featureFlags,
+    };
+  }
+
+  return headers;
 };
 
 describe('API integration', () => {
@@ -191,7 +201,7 @@ describe('API integration', () => {
     await app.close();
   });
 
-  it('allows deleting a note for the same tenant and blocks cross-tenant delete', async () => {
+  it('returns 404 for delete when notes.allowDelete feature flag is disabled', async () => {
     const store = setupStore();
     const app = buildApiApp({ mode: 'test', store });
 
@@ -231,35 +241,118 @@ describe('API integration', () => {
       url: `/notes/${noteId}`,
       headers: authHeaders({
         tenantId: 'tenant-a',
-        userId: 'user-member-a',
-        email: 'member-a@demo.local',
-        roles: 'member',
+        userId: 'user-admin-a',
+        email: 'admin-a@demo.local',
+        roles: 'admin',
       }),
     });
 
-    expect(ownTenantDelete.statusCode).toBe(200);
-    expect(ownTenantDelete.json()).toEqual({
-      deleted: true,
-      noteId,
-    });
+    expect(ownTenantDelete.statusCode).toBe(404);
 
-    const readDeleted = await app.inject({
-      method: 'GET',
-      url: `/notes/${noteId}`,
+    await app.close();
+  });
+
+  it('returns 403 for delete when flag enabled but requester is not admin', async () => {
+    const store = setupStore();
+    const app = buildApiApp({ mode: 'test', store });
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/notes',
       headers: authHeaders({
         tenantId: 'tenant-a',
         userId: 'user-member-a',
         email: 'member-a@demo.local',
         roles: 'member',
       }),
+      payload: {
+        title: 'Delete me',
+        rawText: 'ACTION: delete test note',
+      },
     });
 
-    expect(readDeleted.statusCode).toBe(404);
+    expect(created.statusCode).toBe(200);
+    const noteId = created.json().note.id as string;
+
+    const response = await app.inject({
+      method: 'DELETE',
+      url: `/notes/${noteId}`,
+      headers: authHeaders({
+        tenantId: 'tenant-a',
+        userId: 'user-member-a',
+        email: 'member-a@demo.local',
+        roles: 'member',
+        featureFlags: 'notes.allowDelete=true',
+      }),
+    });
+
+    expect(response.statusCode).toBe(403);
 
     await app.close();
   });
 
-  it('accepts DELETE with application/json header and empty body', async () => {
+  it('deletes note, tasks, and jobs when flag enabled and requester is admin', async () => {
+    const store = setupStore();
+    const app = buildApiApp({ mode: 'test', store });
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/notes',
+      headers: authHeaders({
+        tenantId: 'tenant-a',
+        userId: 'user-member-a',
+        email: 'member-a@demo.local',
+        roles: 'member',
+      }),
+      payload: {
+        title: 'Delete me',
+        rawText: 'ACTION: delete test note',
+      },
+    });
+
+    expect(created.statusCode).toBe(200);
+    const noteId = created.json().note.id as string;
+    const jobId = created.json().job.id as string;
+
+    store.createTask({
+      tenantId: 'tenant-a',
+      noteId,
+      title: 'Task to remove',
+      status: 'suggested',
+      confidence: 0.5,
+    });
+
+    const response = await app.inject({
+      method: 'DELETE',
+      url: `/notes/${noteId}`,
+      headers: authHeaders({
+        tenantId: 'tenant-a',
+        userId: 'user-admin-a',
+        email: 'admin-a@demo.local',
+        roles: 'admin',
+        featureFlags: 'notes.allowDelete=true',
+      }),
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      deleted: true,
+      noteId,
+    });
+
+    expect(store.getNoteByIdForTenant('tenant-a', noteId)).toBeUndefined();
+    expect(store.listTasksByNote('tenant-a', noteId)).toHaveLength(0);
+    expect(store.getJobById(jobId)).toBeUndefined();
+
+    const deletedAudit = store
+      .getSnapshot()
+      .auditEvents.find((event) => event.action === 'note_deleted' && event.entityId === noteId);
+    expect(deletedAudit).toBeDefined();
+
+    await app.close();
+  });
+
+  it('blocks cross-tenant delete attempts with 404 when flag enabled and requester is admin', async () => {
     const store = setupStore();
     const app = buildApiApp({ mode: 'test', store });
 
@@ -284,18 +377,16 @@ describe('API integration', () => {
     const response = await app.inject({
       method: 'DELETE',
       url: `/notes/${noteId}`,
-      headers: {
-        ...authHeaders({
-          tenantId: 'tenant-a',
-          userId: 'user-member-a',
-          email: 'member-a@demo.local',
-          roles: 'member',
-        }),
-        'content-type': 'application/json',
-      },
+      headers: authHeaders({
+        tenantId: 'tenant-b',
+        userId: 'user-admin-b',
+        email: 'admin-b@demo.local',
+        roles: 'admin',
+        featureFlags: 'notes.allowDelete=true',
+      }),
     });
 
-    expect(response.statusCode).toBe(200);
+    expect(response.statusCode).toBe(404);
 
     await app.close();
   });

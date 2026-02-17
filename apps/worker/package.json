@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@meeting-action-extractor/db": "workspace:*",
-    "@meeting-action-extractor/extractor": "workspace:*"
+    "@meeting-action-extractor/extractor": "workspace:*",
+    "@meeting-action-extractor/shared": "workspace:*"
   }
 }

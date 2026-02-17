@@ -1,5 +1,6 @@
 import type { LocalJsonStore } from '@meeting-action-extractor/db';
 import { type IExtractionProvider, RulesExtractionProvider } from '@meeting-action-extractor/extractor';
+import { buildSpanAttributes, getTracer, runWithSpan } from '@meeting-action-extractor/shared';
 
 export type WorkerLogger = {
   info(payload: Record<string, unknown>, message: string): void;
@@ -37,18 +38,16 @@ const getErrorMessage = (error: unknown): string => {
   return 'Unknown worker error';
 };
 
-const processSingleJob = (params: {
+const workerTracer = getTracer('worker');
+
+const processSingleJob = async (params: {
   store: LocalJsonStore;
+  job: { id: string; tenantId: string; noteId: string; status: string };
   provider: IExtractionProvider;
   logger: WorkerLogger;
   maxAttempts: number;
-}): boolean => {
-  const { store, provider, logger, maxAttempts } = params;
-
-  const job = store.lockNextJob();
-  if (!job) {
-    return false;
-  }
+}): Promise<boolean> => {
+  const { store, provider, logger, maxAttempts, job } = params;
 
   logger.info(
     {
@@ -61,99 +60,227 @@ const processSingleJob = (params: {
     'worker.job.locked',
   );
 
-  try {
-    const note = store.setNoteStatus(job.tenantId, job.noteId, 'processing');
-    if (!note) {
-      throw new Error('Note not found for job.');
-    }
-
-    const extractedTasks = provider.extractTasks(note.rawText);
-    const suggested = store.replaceSuggestedTasksForJob({
+  await runWithSpan({
+    tracer: workerTracer,
+    name: 'worker.processJob',
+    attributes: buildSpanAttributes({
+      deploymentEnvironment: process.env.NODE_ENV ?? 'local',
       tenantId: job.tenantId,
-      noteId: note.id,
       jobId: job.id,
-      tasks: extractedTasks,
-    });
+      noteId: job.noteId,
+    }),
+    run: async () => {
+      try {
+        await runWithSpan({
+          tracer: workerTracer,
+          name: 'store.jobs.lock',
+          attributes: buildSpanAttributes({
+            tenantId: job.tenantId,
+            jobId: job.id,
+            noteId: job.noteId,
+          }),
+          run: () => job,
+        });
 
-    const completedJob = store.markJobCompleted(job.id);
-    if (!completedJob) {
-      throw new Error('Job not found while marking completion.');
-    }
+        const note = await runWithSpan({
+          tracer: workerTracer,
+          name: 'store.notes.get',
+          attributes: buildSpanAttributes({
+            tenantId: job.tenantId,
+            jobId: job.id,
+            noteId: job.noteId,
+          }),
+          run: () => store.getNoteByIdForTenant(job.tenantId, job.noteId),
+        });
 
-    const readyNote = store.setNoteStatus(job.tenantId, job.noteId, 'ready');
-    if (!readyNote) {
-      throw new Error('Note not found while marking ready status.');
-    }
+        if (!note) {
+          throw new Error('Note not found for job.');
+        }
 
-    store.addAuditEvent({
-      tenantId: job.tenantId,
-      actorUserId: 'worker',
-      action: 'job_completed',
-      entityType: 'note',
-      entityId: note.id,
-      details: {
-        jobId: job.id,
-      },
-    });
+        await runWithSpan({
+          tracer: workerTracer,
+          name: 'store.notes.set_status',
+          attributes: buildSpanAttributes({
+            tenantId: job.tenantId,
+            jobId: job.id,
+            noteId: job.noteId,
+          }),
+          run: () => store.setNoteStatus(job.tenantId, job.noteId, 'processing'),
+        });
 
-    store.addAuditEvent({
-      tenantId: job.tenantId,
-      actorUserId: 'worker',
-      action: 'tasks_suggested_count',
-      entityType: 'note',
-      entityId: note.id,
-      details: {
-        jobId: job.id,
-        count: String(suggested.length),
-      },
-    });
+        const extractedTasks = await runWithSpan({
+          tracer: workerTracer,
+          name: 'extractor.rules.extract',
+          attributes: buildSpanAttributes({
+            tenantId: job.tenantId,
+            jobId: job.id,
+            noteId: note.id,
+          }),
+          run: () => provider.extractTasks(note.rawText),
+        });
 
-    logger.info(
-      {
-        tenantId: job.tenantId,
-        jobId: job.id,
-        noteId: note.id,
-        tasksSuggested: suggested.length,
-        status: completedJob.status,
-        transition: 'processing->done',
-      },
-      'worker.job.completed',
-    );
+        const suggested = await runWithSpan({
+          tracer: workerTracer,
+          name: 'store.tasks.upsert',
+          attributes: buildSpanAttributes({
+            tenantId: job.tenantId,
+            jobId: job.id,
+            noteId: note.id,
+          }),
+          run: () =>
+            store.replaceSuggestedTasksForJob({
+              tenantId: job.tenantId,
+              noteId: note.id,
+              jobId: job.id,
+              tasks: extractedTasks,
+            }),
+        });
 
-    return true;
-  } catch (error: unknown) {
-    const errorMessage = getErrorMessage(error);
-    const updatedJob = store.markJobAttemptFailed(job.id, errorMessage, maxAttempts);
+        const completedJob = await runWithSpan({
+          tracer: workerTracer,
+          name: 'store.jobs.complete',
+          attributes: buildSpanAttributes({
+            tenantId: job.tenantId,
+            jobId: job.id,
+            noteId: note.id,
+          }),
+          run: () => store.markJobCompleted(job.id),
+        });
 
-    if (updatedJob?.status === 'failed') {
-      store.setNoteStatus(job.tenantId, job.noteId, 'failed');
-      store.addAuditEvent({
-        tenantId: job.tenantId,
-        actorUserId: 'worker',
-        action: 'job_failed',
-        entityType: 'note',
-        entityId: job.noteId,
-        details: {
-          jobId: job.id,
-          attempts: String(updatedJob.attempts),
-          error: errorMessage,
-        },
-      });
-    }
+        if (!completedJob) {
+          throw new Error('Job not found while marking completion.');
+        }
 
-    logger.error(
-      {
-        tenantId: job.tenantId,
-        jobId: job.id,
-        noteId: job.noteId,
-        status: updatedJob?.status,
-        attempts: updatedJob?.attempts,
-      },
-      `worker.job.failed: ${errorMessage}`,
-    );
+        await runWithSpan({
+          tracer: workerTracer,
+          name: 'store.notes.set_status',
+          attributes: buildSpanAttributes({
+            tenantId: job.tenantId,
+            jobId: job.id,
+            noteId: note.id,
+          }),
+          run: () => store.setNoteStatus(job.tenantId, job.noteId, 'ready'),
+        });
 
-    return true;
-  }
+        await runWithSpan({
+          tracer: workerTracer,
+          name: 'store.audit.write',
+          attributes: buildSpanAttributes({
+            tenantId: job.tenantId,
+            jobId: job.id,
+            noteId: note.id,
+          }),
+          run: () =>
+            store.addAuditEvent({
+              tenantId: job.tenantId,
+              actorUserId: 'worker',
+              action: 'job_completed',
+              entityType: 'note',
+              entityId: note.id,
+              details: {
+                jobId: job.id,
+              },
+            }),
+        });
+
+        await runWithSpan({
+          tracer: workerTracer,
+          name: 'store.audit.write',
+          attributes: buildSpanAttributes({
+            tenantId: job.tenantId,
+            jobId: job.id,
+            noteId: note.id,
+          }),
+          run: () =>
+            store.addAuditEvent({
+              tenantId: job.tenantId,
+              actorUserId: 'worker',
+              action: 'tasks_suggested_count',
+              entityType: 'note',
+              entityId: note.id,
+              details: {
+                jobId: job.id,
+                count: String(suggested.length),
+              },
+            }),
+        });
+
+        logger.info(
+          {
+            tenantId: job.tenantId,
+            jobId: job.id,
+            noteId: note.id,
+            tasksSuggested: suggested.length,
+            status: completedJob.status,
+            transition: 'processing->done',
+          },
+          'worker.job.completed',
+        );
+      } catch (error: unknown) {
+        const errorMessage = getErrorMessage(error);
+
+        const updatedJob = await runWithSpan({
+          tracer: workerTracer,
+          name: 'store.jobs.fail',
+          attributes: buildSpanAttributes({
+            tenantId: job.tenantId,
+            jobId: job.id,
+            noteId: job.noteId,
+          }),
+          run: () => store.markJobAttemptFailed(job.id, errorMessage, maxAttempts),
+        });
+
+        if (updatedJob?.status === 'failed') {
+          await runWithSpan({
+            tracer: workerTracer,
+            name: 'store.notes.set_status',
+            attributes: buildSpanAttributes({
+              tenantId: job.tenantId,
+              jobId: job.id,
+              noteId: job.noteId,
+            }),
+            run: () => store.setNoteStatus(job.tenantId, job.noteId, 'failed'),
+          });
+
+          await runWithSpan({
+            tracer: workerTracer,
+            name: 'store.audit.write',
+            attributes: buildSpanAttributes({
+              tenantId: job.tenantId,
+              jobId: job.id,
+              noteId: job.noteId,
+            }),
+            run: () =>
+              store.addAuditEvent({
+                tenantId: job.tenantId,
+                actorUserId: 'worker',
+                action: 'job_failed',
+                entityType: 'note',
+                entityId: job.noteId,
+                details: {
+                  jobId: job.id,
+                  attempts: String(updatedJob.attempts),
+                  error: errorMessage,
+                },
+              }),
+          });
+        }
+
+        logger.error(
+          {
+            tenantId: job.tenantId,
+            jobId: job.id,
+            noteId: job.noteId,
+            status: updatedJob?.status,
+            attempts: updatedJob?.attempts,
+          },
+          `worker.job.failed: ${errorMessage}`,
+        );
+      }
+    },
+  });
+
+  return true;
 };
 
 export const runOnce = async (options: RunOnceOptions): Promise<number> => {
@@ -164,8 +291,22 @@ export const runOnce = async (options: RunOnceOptions): Promise<number> => {
 
   let processed = 0;
   while (processed < maxJobs) {
-    const didProcess = processSingleJob({
+    const job = await runWithSpan({
+      tracer: workerTracer,
+      name: 'store.jobs.lock',
+      attributes: buildSpanAttributes({
+        deploymentEnvironment: process.env.NODE_ENV ?? 'local',
+      }),
+      run: () => options.store.lockNextJob(),
+    });
+
+    if (!job) {
+      break;
+    }
+
+    const didProcess = await processSingleJob({
       store: options.store,
+      job,
       provider,
       logger,
       maxAttempts,

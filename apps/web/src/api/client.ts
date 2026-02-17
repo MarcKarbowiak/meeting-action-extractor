@@ -7,6 +7,7 @@ import type {
   CreateNoteResponse,
   UpdateTaskResponse,
 } from './types.js';
+import { getFeatureFlagsHeader, loadDevContext, type DevContext } from '../dev-context.js';
 
 export class ApiError extends Error {
   constructor(
@@ -20,25 +21,18 @@ export class ApiError extends Error {
   }
 }
 
-type DevHeaders = {
-  tenantId: string;
-  userId: string;
-  email: string;
-  roles: string; // comma-separated
-};
-
 const getBaseUrl = (): string => {
   return import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
 };
 
-const getDevHeaders = (): DevHeaders | null => {
-  try {
-    const stored = localStorage.getItem('dev-context');
-    if (!stored) return null;
-    return JSON.parse(stored);
-  } catch {
+const getDevHeaders = (): DevContext | null => {
+  const context = loadDevContext();
+
+  if (!context.tenantId || !context.userId || !context.email) {
     return null;
   }
+
+  return context;
 };
 
 const buildHeaders = (includeJsonContentType = false): Record<string, string> => {
@@ -54,6 +48,11 @@ const buildHeaders = (includeJsonContentType = false): Record<string, string> =>
     headers['x-user-id'] = devHeaders.userId;
     headers['x-user-email'] = devHeaders.email;
     headers['x-user-roles'] = devHeaders.roles;
+
+    const featureHeader = getFeatureFlagsHeader(devHeaders);
+    if (featureHeader) {
+      headers['x-feature-flags'] = featureHeader;
+    }
   }
 
   return headers;

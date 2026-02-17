@@ -33,6 +33,7 @@ describe('API Client', () => {
       userId: 'user-test-001',
       email: 'test@example.com',
       roles: 'admin,member',
+      allowDeleteNotes: true,
     };
 
     localStorage.setItem('dev-context', JSON.stringify(devContext));
@@ -58,6 +59,7 @@ describe('API Client', () => {
       expect(capturedHeaders['x-user-id']).toBe('user-test-001');
       expect(capturedHeaders['x-user-email']).toBe('test@example.com');
       expect(capturedHeaders['x-user-roles']).toBe('admin,member');
+      expect(capturedHeaders['x-feature-flags']).toBe('notes.allowDelete=true');
     } finally {
       global.fetch = originalFetch;
     }
