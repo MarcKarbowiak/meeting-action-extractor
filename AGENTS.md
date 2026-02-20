@@ -1,36 +1,46 @@
-# AGENTS.md — Repo Instructions for Copilot Agent (Codex)
+# AGENTS.md — Instructions for Copilot Agent (Codex)
 
-This repository is intended to be implemented and evolved using AI coding agents (Copilot Agent Mode).
-These instructions are mandatory for any agent making changes.
+This repository is implemented and maintained using AI coding agents (Copilot Agent Mode).
+All agents must follow these instructions.
 
 ---
 
-## Repo Goal
+## 0) Source of Truth
 
-Build a demo-ready, consulting-grade reference implementation:
+Before doing any work, read:
 
-**meeting-action-extractor**
-A multi-tenant app that extracts structured action items from meeting notes into reviewable tasks.
+1) `PROJECT_PLAN.md`  
+2) `SESSION_PRIMER.md`  
+3) `README.md`
 
-Two modes:
+If any instructions conflict, **follow `PROJECT_PLAN.md`**.
+
+---
+
+## 1) Repo Goal
+
+**meeting-action-extractor** is a demo-ready, consulting-grade multi-tenant system that extracts action items from meeting notes into reviewable tasks.
+
+It must support two modes:
+
 - **Local Mode:** runnable with `docker compose up` (no Azure required)
-- **Azure Mode:** reference architecture (App Service + Functions + Key Vault + Managed Identity), not required to run locally
+- **Azure Mode (reference):** architecture docs + IaC skeleton using **Key Vault + Managed Identity** (not required to run locally)
 
 ---
 
-## Hard Rules (Non-negotiable)
+## 2) Hard Rules (Non-negotiable)
 
 ### No secrets in repo
-- Never commit secrets (keys, tokens, connection strings) anywhere.
-- Do not paste secrets into code, tests, docs, or examples.
-- Azure Mode must use **Managed Identity + Key Vault** for secrets.
-- Local Mode may use environment variables for dev-only (provide `.env.example` placeholders only).
+- Never commit secrets (keys, tokens, connection strings, credentials).
+- Azure Mode must use **Key Vault + Managed Identity**.
+- Local Mode can use env vars for development only.
+- Commit `.env.example` only (placeholders).
 
-### Tenant isolation required everywhere
-- Every record must include `tenant_id`.
-- Every query must filter by `tenant_id`.
-- Every API endpoint must enforce tenant context.
-- Never allow cross-tenant reads or writes.
+### Tenant isolation everywhere
+- Every persisted record includes `tenant_id`.
+- Every DB query filters by `tenant_id`.
+- Every API request must carry tenant context.
+- Never allow cross-tenant reads/writes.
 
 ### RBAC
 Roles:
@@ -38,29 +48,54 @@ Roles:
 - `member`
 - `reader`
 
-Permissions:
-- Reader: view-only
-- Member: create notes, review/approve/edit tasks
+Minimum permissions:
+- Reader: read-only
+- Member: submit notes + approve/reject/edit tasks
 - Admin: manage tenant members + everything Member can do
 
-### Incremental delivery
-- Work in small, reviewable commits.
-- Do not perform “big bang” refactors.
-- Keep changes scoped to the active phase.
+### Incremental progress
+- Work in small, reviewable changes.
+- After each phase, run lint/typecheck/tests and fix until green.
+- Avoid “big bang” refactors.
 
 ---
 
-## Coding Standards
+## 3) Preferred Stack & Conventions
 
-- TypeScript strict mode for all apps/packages.
-- Prefer small modules and clear boundaries.
-- Keep API/worker logic behind interfaces (“ports/adapters” style).
-- Write structured logs with `requestId` and `tenantId`.
+### Monorepo
+Use **pnpm workspaces**.
+
+Recommended structure:
+
+/apps
+- web (React + TS + Vite)
+- api (Node + TS)
+- worker (Node + TS)
+
+/packages
+- shared (types, auth helpers, logger)
+- db (migrations, DB client, repositories)
+- extractor (provider interface + rules-based extractor)
+
+/infra
+- local (docker-compose, seed)
+- azure (IaC skeleton + notes)
+
+/docs
+- architecture (local-vs-azure mapping)
+
+### TypeScript
+- Strict mode everywhere
+- Shared types in `/packages/shared`
+
+### Logging
+- Structured logging (include `requestId` + `tenantId`)
+- No sensitive data in logs
 
 ---
 
-## Commands (Local Dev)
+## 4) Build & Run Commands
 
-### Start everything
+### Install
 ```bash
-docker compose up
+pnpm install
